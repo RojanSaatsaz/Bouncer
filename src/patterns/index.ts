@@ -1,6 +1,7 @@
 // SPEC Flow 5: REPORT → anonymised template → count by ZIP3 → spike → one local alert → feeds Flow 1.
 // Privacy (rule 1): the reported text lives only in memory until Gemini has templated it. report_templates
 // and report_counts never hold a user id, a handle or the original text, and report logs carry no user id.
+import { config } from "../config.js";
 import { query, one } from "../db.js";
 import { textUser, type User } from "../users.js";
 import { generate } from "../detection/gemini.js";
@@ -13,7 +14,7 @@ import { makeTemplate, embed, cosine, jaccard, SHORTENERS, type Template } from 
 export { rememberBody } from "./memory.js";
 
 /** Reports in one ZIP3 within 48 h that make a template spike (SPEC says 5; 3 for the demo). */
-export const SPIKE_THRESHOLD = Math.max(1, Number(process.env.PATTERN_SPIKE_THRESHOLD) || 3);
+export const SPIKE_THRESHOLD = config.spikeThreshold;
 // SPEC says 0.88. Measured on gemini-embedding-2 templates (2026-11-08): variants of one scam 0.93–0.94,
 // different scams of the same scam_type 0.72–0.76. 0.86 tolerates a variant whose brand Gemini dropped.
 const COSINE_MATCH = 0.86;

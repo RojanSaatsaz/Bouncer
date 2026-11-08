@@ -77,4 +77,12 @@ export const config = {
   llmSecret: env("BOUNCER_LLM_SECRET"),
   initToken: env("BOUNCER_INIT_TOKEN"),
   safeWordKey: env("SAFE_WORD_KEY"),
+
+  // Flow 7 (optional): basic-auth password for /dashboard and /carrier. Unset → those routes return 503.
+  dashboardPassword: process.env.DASHBOARD_PASSWORD?.trim() || null,
+  // Flow 5: Gemini embedding model for report templates, and reports per ZIP3 in 48 h that make a spike.
+  embedModel: process.env.GEMINI_EMBED_MODEL?.trim() || "gemini-embedding-2",
+  spikeThreshold: Math.max(1, Number(process.env.PATTERN_SPIKE_THRESHOLD) || 3),
+  // Flow 7 (optional): phone that "Send toll scam to Grandma's line" targets; default is the first circle's protected user.
+  demoVictimPhone: process.env.DEMO_VICTIM_PHONE?.trim() || null,
 };

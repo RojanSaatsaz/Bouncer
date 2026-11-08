@@ -8,6 +8,7 @@ import { startPhotonSocket, stopPhotonSocket } from "./photon/socket.js";
 import { handleInbound } from "./messages/inbound.js";
 import { handleChatCompletions } from "./voice/llm.js";
 import { handlePostCall, handleInit } from "./voice/webhooks.js";
+import { dashboardApp } from "./dashboard/app.js";
 
 const app = new Hono();
 
@@ -33,6 +34,9 @@ app.post("/v1/chat/completions", async (c) => {
 
 app.post("/elevenlabs/post-call", (c) => handlePostCall(c));
 app.post("/elevenlabs/init", (c) => handleInit(c));
+
+// Flow 7: /dashboard (+ stream, demo buttons) and /carrier/events, behind basic auth (DASHBOARD_PASSWORD).
+app.route("/", dashboardApp);
 
 // Railway sets PORT (pinned to 3000 in Variables to match the domain's target port). Bind 0.0.0.0.
 serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, (info) => {

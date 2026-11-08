@@ -1,0 +1,50 @@
+{
+  "jev_model": "jev-1.14.0",
+  "updated": "2026-11-08",
+  "note": "Shown on the dashboard's Accuracy panel. Numbers come from docs/EVAL.md, docs/EVAL_ARCHIVE.md and docs/EVAL_CALLS.md; update this file when they are re-run.",
+  "sets": [
+    {
+      "id": "archive_test",
+      "title": "Text messages: scams archive 2024–2026",
+      "dataset": "scams_archive_en.csv test split, English, 1,276 non-call rows (synthetic), scored once",
+      "rule": "current level logic (Likely+ needs a red flag other than impersonation, unless severe)",
+      "jev_model": "jev-1.14.0",
+      "metrics": [
+        { "label": "Scams caught", "value": "100%", "detail": "952 of 952" },
+        { "label": "Real messages flagged", "value": "0.3%", "detail": "1 of 324" }
+      ]
+    },
+    {
+      "id": "mendeley_holdout",
+      "title": "Text messages: Mendeley SMS holdout",
+      "dataset": "mendeley_clean.csv holdout, 1,160 messages never used for tuning, scored once",
+      "rule": "level logic before the red-flag rule",
+      "jev_model": "jev-1.14.0",
+      "metrics": [
+        { "label": "Scams caught", "value": "98.1%", "detail": "104 of 106" },
+        { "label": "Real messages flagged", "value": "2.0%", "detail": "19 of 967" },
+        { "label": "High-risk precision", "value": "90.8%", "detail": "99 of 109" }
+      ],
+      "levels": {
+        "columns": ["Safe", "Not sure", "Likely scam", "High risk"],
+        "rows": [
+          { "label": "Real (ham)", "counts": [910, 38, 9, 10] },
+          { "label": "Scam (smishing)", "counts": [1, 1, 5, 99] },
+          { "label": "Spam (reported separately)", "counts": [7, 12, 29, 39] }
+        ]
+      }
+    },
+    {
+      "id": "calls",
+      "title": "Phone calls: live listen",
+      "dataset": "BETTER30 multi-turn calls (37 scam, 22 legit)",
+      "rule": "current alert gate: a concrete ask, or 2 Likely+ scorings in a row",
+      "jev_model": "jev-1.14.0",
+      "metrics": [
+        { "label": "Scam calls texted", "value": "97.3%", "detail": "36 of 37" },
+        { "label": "Normal calls texted", "value": "0%", "detail": "0 of 22" },
+        { "label": "Median time to alert", "value": "1 turn", "detail": "after the first scam line" }
+      ]
+    }
+  ]
+}

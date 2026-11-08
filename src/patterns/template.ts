@@ -6,7 +6,7 @@ import { generateJson } from "../detection/gemini.js";
 import { SCAM_TYPES } from "../detection/questions.js";
 
 // Optional env, read here because Flow 5 is the only user. (Move into src/config.ts if it grows.)
-export const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL?.trim() || "gemini-embedding-2";
+export const EMBED_MODEL = config.embedModel;
 export const EMBED_DIMS = 768;
 
 export interface Template {

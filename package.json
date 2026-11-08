@@ -12,10 +12,14 @@
     "test:message": "tsx --env-file=.env scripts/test-message.ts",
     "test:call": "tsx --env-file=.env scripts/test-call.ts",
     "test:postcall": "tsx --env-file=.env scripts/test-postcall.ts",
+    "test:setup": "tsx --env-file=.env scripts/test-setup.ts",
+    "test:patterns": "tsx --env-file=.env scripts/test-patterns.ts",
+    "test:recovery": "tsx --env-file=.env scripts/test-recovery.ts",
     "seed:family": "tsx --env-file=.env scripts/seed-family.ts",
     "eval": "tsx --env-file=.env scripts/eval.ts",
     "eval:archive": "tsx --env-file=.env scripts/eval-archive.ts",
-    "eval:calls": "tsx --env-file=.env scripts/eval-calls.ts"
+    "eval:calls": "tsx --env-file=.env scripts/eval-calls.ts",
+    "replay": "tsx --env-file=.env scripts/replay.ts"
   },
   "engines": {
     "node": ">=22"

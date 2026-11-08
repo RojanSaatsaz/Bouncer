@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bouncer Carrier View</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f6;
+    --surface: #ffffff;
+    --surface-2: #f8f8fa;
+    --border: #e3e3e8;
+    --ink: #16161a;
+    --ink-2: #4a4a55;
+    --ink-3: #75757f;
+    --accent: #e20074;          /* magenta brand accent: header, primary button, "texted" marker */
+    --accent-ink: #b0005a;
+    --accent-soft: #fde6f1;
+    /* status (levels) — always paired with a text label */
+    --good: #0ca30c;   --good-bg: #e6f6e6;   --good-ink: #0b6b0b;
+    --warn: #fab219;   --warn-bg: #fff4dc;   --warn-ink: #7a5300;
+    --serious: #ec835a; --serious-bg: #fdebe3; --serious-ink: #9a3c16;
+    --critical: #d03b3b; --critical-bg: #fbe5e5; --critical-ink: #9d1f1f;
+    /* ZIP3 series (categorical, validated, fixed order) */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #6250d6;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 4px solid var(--accent);
+  }
+  .logo {
+    width: 36px; height: 36px; border-radius: 9px; background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-weight: 800; font-size: 20px; flex: none;
+  }
+  header h1 { margin: 0; font-size: 21px; letter-spacing: -0.01em; }
+  header .sub { color: var(--ink-3); font-size: 14px; }
+  header .spacer { flex: 1; }
+  .live { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--ink-2); }
+  .live i { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-3); }
+  .live.on i { background: var(--good); box-shadow: 0 0 0 4px var(--good-bg); }
+  .live.off i { background: var(--critical); }
+  #clock { font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 600; min-width: 5.5em; text-align: right; }
+
+  main { padding: 16px 24px 24px; display: grid; gap: 16px; grid-template-columns: repeat(12, minmax(0, 1fr)); max-width: 1920px; margin: 0 auto; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; min-width: 0; }
+  .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
+  .card h2 .note { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-3); font-size: 13px; margin-left: auto; }
+
+  /* KPI tiles */
+  .kpis { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; }
+  .kpi .label { color: var(--ink-2); font-size: 13px; font-weight: 600; }
+  .kpi .value { font-size: 34px; font-weight: 750; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 2px; }
+  .kpi .detail { color: var(--ink-3); font-size: 13px; }
+  .kpi.accent .value { color: var(--accent-ink); }
+
+  .feed { grid-column: span 7; display: flex; flex-direction: column; height: 560px; }
+  .side { grid-column: span 5; display: grid; gap: 16px; grid-template-rows: auto 1fr; height: 560px; min-width: 0; }
+  .accuracy { grid-column: span 7; }
+  .reports { grid-column: span 5; }
+
+  /* feed table */
+  .feed-scroll { overflow: auto; flex: 1; margin: 0 -18px -16px; border-top: 1px solid var(--border); }
+  table { border-collapse: collapse; width: 100%; }
+  th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 10px; border-bottom: 1px solid var(--border); z-index: 1; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 14px; }
+  th:first-child, td:first-child { padding-left: 18px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.time { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.src { white-space: nowrap; font-weight: 600; font-size: 13px; }
+  td.src small { display: block; font-weight: 400; color: var(--ink-3); }
+  td.msg { color: var(--ink-2); max-width: 0; width: 42%; }
+  td.msg .body { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  td.msg .private { font-style: italic; color: var(--ink-3); }
+  td.type, td.from { white-space: nowrap; }
+  tr.new td { animation: flash 2.4s ease-out; }
+  tr.alerted td { background: var(--accent-soft); }
+  @keyframes flash { from { background: #fff1b8; } to { background: transparent; } }
+  .empty { color: var(--ink-3); text-align: center; padding: 40px 12px; }
+
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 999px; font-size: 13px; font-weight: 650; white-space: nowrap; }
+  .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .lv-safe { background: var(--good-bg); color: var(--good-ink); }
+  .lv-unsure { background: var(--warn-bg); color: var(--warn-ink); }
+  .lv-likely_scam { background: var(--serious-bg); color: var(--serious-ink); }
+  .lv-high_risk { background: var(--critical-bg); color: var(--critical-ink); }
+  .lv-none { background: var(--surface-2); color: var(--ink-3); }
+  .chip { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2); margin-top: 3px; white-space: nowrap; }
+  .chip.texted { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+
+  /* demo controls */
+  .controls { display: grid; grid-template-columns: 1.6fr 1fr 0.7fr 1fr; gap: 10px; align-items: stretch; }
+  .controls button { padding: 10px 10px; }
+  button { font: inherit; font-weight: 650; border-radius: 9px; padding: 10px 14px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer; }
+  button:hover { background: var(--surface-2); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-ink); }
+  button.ghost { color: var(--critical-ink); }
+  .status { margin-top: 10px; font-size: 14px; color: var(--ink-2); min-height: 1.4em; }
+  .status b { color: var(--ink); }
+
+  /* trends */
+  .trend-head { display: flex; align-items: center; gap: 8px; }
+  .seg { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .trends { display: flex; flex-direction: column; min-height: 0; }
+  .chart-wrap { position: relative; flex: 1; min-height: 160px; }
+  .chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); pointer-events: none; }
+  .zip-totals { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+  .zip-totals span { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .zip-totals i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  /* accuracy */
+  .sets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .set { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-2); }
+  .set h3 { margin: 0; font-size: 15px; }
+  .set .ds { color: var(--ink-3); font-size: 12px; margin: 2px 0 10px; }
+  .metric { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+  .metric .v { font-size: 26px; font-weight: 750; letter-spacing: -0.02em; min-width: 3.6em; font-variant-numeric: tabular-nums; }
+  .metric .l { font-size: 14px; font-weight: 600; }
+  .metric .d { display: block; font-size: 12px; color: var(--ink-3); font-weight: 400; }
+  .levels { margin-top: 12px; font-size: 13px; }
+  .levels td, .levels th { padding: 4px 8px; font-size: 13px; }
+  .levels th { position: static; }
+  .acc-foot { margin-top: 12px; font-size: 13px; color: var(--ink-3); }
+  .acc-foot b { color: var(--ink-2); }
+  .warn-text { color: var(--critical-ink); font-weight: 600; }
+
+  /* reports */
+  .counter { display: flex; gap: 28px; align-items: baseline; }
+  .counter .big { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .counter .lbl { color: var(--ink-2); font-size: 13px; font-weight: 600; }
+  .templates { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+  .templates li { border: 1px solid var(--border); border-left: 4px solid var(--critical); border-radius: 8px; padding: 8px 12px; background: var(--surface-2); }
+  .templates .t { font-size: 14px; color: var(--ink); }
+  .templates .m { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .spike { font-size: 11px; font-weight: 750; color: var(--critical-ink); background: var(--critical-bg); border-radius: 5px; padding: 1px 6px; margin-right: 6px; letter-spacing: 0.04em; }
+  .muted { color: var(--ink-3); }
+  .by-zip { margin-top: 10px; font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+
+  @media (max-width: 1100px) {
+    .feed, .side, .accuracy, .reports { grid-column: 1 / -1; }
+    .side { height: auto; }
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sets { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    main, header { padding-left: 16px; padding-right: 16px; }
+    .kpis { grid-template-columns: 1fr; }
+    .controls { grid-template-columns: 1fr 1fr; }
+    header .sub { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" aria-hidden="true">B</div>
+  <div>
+    <h1>Bouncer · Carrier view</h1>
+    <div class="sub">Simulated T-Mobile network traffic, North Texas · every verdict from TypeSafe Jev</div>
+  </div>
+  <div class="spacer"></div>
+  <span id="live" class="live"><i></i><span>Connecting…</span></span>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <section class="kpis" aria-label="Totals since last reset">
+    <div class="kpi"><div class="label">Texts scanned</div><div class="value" id="k-scanned">0</div><div class="detail">simulated network SMS</div></div>
+    <div class="kpi accent"><div class="label">Flagged as scam</div><div class="value" id="k-flagged">0</div><div class="detail" id="k-flagged-d">Likely scam or High risk</div></div>
+    <div class="kpi accent"><div class="label">Customers warned by text</div><div class="value" id="k-alerted">0</div><div class="detail" id="k-users">plus Bouncer app checks</div></div>
+    <div class="kpi"><div class="label">Median decision time</div><div class="value" id="k-latency">–</div><div class="detail">one Jev request per text</div></div>
+    <div class="kpi"><div class="label">Replay check vs dataset labels</div><div class="value" id="k-check">–</div><div class="detail" id="k-check-d">scams caught in this replay</div></div>
+  </section>
+
+  <section class="card feed" aria-label="Live feed">
+    <h2>Live feed <span class="note">Bouncer app rows show type and outcome only. No content is stored.</span></h2>
+    <div class="feed-scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Source</th><th>ZIP</th><th>Verdict</th><th class="num">Conf.</th><th>Scam type</th><th>From</th><th>Message</th></tr></thead>
+        <tbody id="feed"><tr><td colspan="8" class="empty">Waiting for traffic…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="side">
+    <section class="card" aria-label="Demo controls">
+      <h2>Demo controls</h2>
+      <div class="controls">
+        <button class="primary" id="b-toll">Send toll scam to Grandma's line</button>
+        <button id="b-start">Start bulk replay</button>
+        <button id="b-stop" disabled>Stop</button>
+        <button class="ghost" id="b-reset">Reset demo</button>
+      </div>
+      <div class="status" id="status">Ready.</div>
+    </section>
+
+    <section class="card trends" aria-label="Trends">
+      <div class="trend-head">
+        <h2 style="margin:0">Flagged texts by ZIP3</h2>
+        <div class="seg" role="group" aria-label="Time range">
+          <button id="r-min" aria-pressed="true">Per minute · 30 min</button>
+          <button id="r-hour" aria-pressed="false">Per hour · 24 h</button>
+        </div>
+      </div>
+      <div class="chart-wrap" style="margin-top:10px"><canvas id="chart" aria-label="Flagged texts over time, stacked by ZIP3"></canvas><div class="chart-empty" id="chart-empty">No flagged texts yet</div></div>
+      <div class="zip-totals" id="zip-totals"></div>
+    </section>
+  </div>
+
+  <section class="card accuracy" aria-label="Accuracy">
+    <h2>Accuracy <span class="note" id="acc-note"></span></h2>
+    <div class="sets" id="sets"><div class="muted">Loading…</div></div>
+    <div class="acc-foot" id="acc-foot"></div>
+  </section>
+
+  <section class="card reports" aria-label="Customer reports">
+    <h2>Customer scam reports <span class="note">anonymised: ZIP3 and day only</span></h2>
+    <div id="reports"><div class="muted">No reports yet.</div></div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (n) => (n ?? 0).toLocaleString("en-US");
+
+  const LEVEL = { safe: "Looks safe", unsure: "Not sure", likely_scam: "Likely scam", high_risk: "High risk" };
+  const TYPE = {
+    toll_or_delivery: "Toll / delivery", bank_or_card: "Bank / card", crypto: "Crypto", government: "Government",
+    tech_support: "Tech support", family_emergency: "Family emergency", job_or_prize: "Job / prize",
+    marketplace: "Marketplace", romance_or_investment: "Romance / investment", other: "Other",
+  };
+  const KIND = { imessage: "iMessage check", call: "Call listen", family: "Family safety", recovery: "Recovery", report: "Report" };
+  const ZIP3 = [
+    { z: "750", name: "750 Plano · Irving", color: "#2a78d6" },
+    { z: "752", name: "752 Dallas", color: "#eb6834" },
+    { z: "760", name: "760 Arlington", color: "#1baf7a" },
+    { z: "761", name: "761 Fort Worth", color: "#eda100" },
+    { z: "762", name: "762 Denton", color: "#6250d6" },
+  ];
+  const zipName = (z) => (ZIP3.find((x) => x.z === z) || { name: z }).name;
+
+  // ---- clock ----
+  const tick = () => ($("clock").textContent = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }));
+  tick(); setInterval(tick, 1000);
+
+  // ---- live feed ----
+  const MAX_ROWS = 120;
+  const seen = new Set();
+  const tbody = $("feed");
+  const badge = (lv) => `<span class="badge lv-${lv || "none"}">${esc(LEVEL[lv] || "No verdict")}</span>`;
+
+  function rowHtml(r) {
+    const t = new Date(r.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    const type = r.scam_type && (r.level === "likely_scam" || r.level === "high_risk") ? TYPE[r.scam_type] || r.scam_type : "–";
+    if (r.kind === "carrier") {
+      const src = "Network SMS";
+      const sub = r.bulk ? "bulk replay" : "demo";
+      const label = r.true_label ? `<span class="chip">dataset: ${esc(r.true_label)}</span>` : "";
+      const texted = r.alerted ? ` <span class="chip texted">Customer texted</span>` : "";
+      return `<td class="time">${t}</td><td class="src">${src}<small>${sub}</small></td><td>${esc(r.zip || "–")}</td>
+        <td>${badge(r.level)}</td><td class="num">${r.confidence == null ? "–" : r.confidence + "%"}</td>
+        <td class="type">${esc(type)}</td><td class="from">${esc(r.sender || "–")}</td>
+        <td class="msg"><div class="body">${esc(r.body)}</div>${label}${texted}</td>`;
+    }
+    const outcome = r.outcome ? esc(String(r.outcome).replace(/_/g, " ")) : "";
+    return `<td class="time">${t}</td><td class="src">${esc(KIND[r.kind] || r.kind)}<small>Bouncer user</small></td><td>–</td>
+      <td>${badge(r.level)}</td><td class="num">${r.confidence == null ? "–" : r.confidence + "%"}</td>
+      <td class="type">${esc(type)}</td><td>–</td>
+      <td class="msg"><span class="private">Content not stored</span>${outcome ? ` <span class="chip">${outcome}</span>` : ""}${r.alerted ? ` <span class="chip texted">Alert sent</span>` : ""}</td>`;
+  }
+
+  function addRows(rows, animate) {
+    if (!rows.length) return;
+    const empty = tbody.querySelector(".empty");
+    if (empty) empty.parentElement.remove();
+    for (const r of rows) {
+      if (seen.has(r.key)) continue;
+      seen.add(r.key);
+      const tr = document.createElement("tr");
+      tr.innerHTML = rowHtml(r);
+      if (r.alerted && r.kind === "carrier") tr.classList.add("alerted");
+      if (animate) tr.classList.add("new");
+      tbody.insertBefore(tr, tbody.firstChild);
+    }
+    while (tbody.children.length > MAX_ROWS) tbody.lastChild.remove();
+  }
+  function clearFeed() {
+    seen.clear();
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">Waiting for traffic…</td></tr>`;
+  }
+
+  // ---- stats ----
+  let lastStats = null, resetAt = null, range = "min", chart = null;
+
+  function renderStats(s) {
+    lastStats = s;
+    if (resetAt && s.resetAt !== resetAt) clearFeed();
+    resetAt = s.resetAt;
+    const k = s.kpi || {};
+    $("k-scanned").textContent = fmt(k.scanned);
+    $("k-flagged").textContent = fmt(k.flagged);
+    $("k-flagged-d").textContent = k.scanned ? `${Math.round((100 * k.flagged) / k.scanned)}% of scanned · Likely or High` : "Likely scam or High risk";
+    $("k-alerted").textContent = fmt(k.alerted);
+    const u = (s.users || []).reduce((a, r) => ({ n: a.n + r.n, f: a.f + r.flagged }), { n: 0, f: 0 });
+    $("k-users").textContent = u.n ? `plus ${fmt(u.n)} Bouncer app checks (${fmt(u.f)} flagged)` : "plus Bouncer app checks";
+    $("k-latency").textContent = k.median_ms == null ? "–" : (k.median_ms / 1000).toFixed(1) + " s";
+    if (k.scams) {
+      $("k-check").textContent = `${k.scams_caught}/${k.scams}`;
+      $("k-check-d").textContent = `scams caught · normal texts flagged ${k.legit_flagged}/${k.legit}` + (k.spam ? ` · spam ${k.spam_flagged}/${k.spam}` : "");
+    } else {
+      $("k-check").textContent = "–";
+      $("k-check-d").textContent = "start a replay to compare with dataset labels";
+    }
+    renderReplay(s.replay);
+    renderChart();
+    renderReports(s.reports);
+  }
+
+  function renderReplay(r) {
+    if (!r) return;
+    $("b-start").disabled = r.running;
+    $("b-stop").disabled = !r.running;
+    if (r.running) setStatus(`Bulk replay running: <b>${r.sent}</b> of ${r.total} sent${r.failed ? `, ${r.failed} failed` : ""}. Bulk texts never alert anyone.`);
+    else if (r.error && !statusPinned) setStatus(`<span class="warn-text">Replay: ${esc(r.error)}</span>`);
+  }
+
+  // ---- chart ----
+  function renderChart() {
+    if (!lastStats || !window.Chart) return;
+    const tr = lastStats.trends[range === "min" ? "perMinute" : "perHour"];
+    const step = tr.bucketMs;
+    const end = Math.floor(Date.now() / step) * step;
+    const n = Math.round(tr.windowMs / step);
+    const times = Array.from({ length: n }, (_, i) => end - (n - 1 - i) * step);
+    const idx = new Map(times.map((t, i) => [t, i]));
+    const totals = {};
+    const datasets = ZIP3.map((z) => ({
+      label: z.name, backgroundColor: z.color, data: new Array(n).fill(0),
+      borderColor: "#ffffff", borderWidth: { top: 2 }, borderSkipped: "bottom", borderRadius: 3, maxBarThickness: 28, stack: "s",
+    }));
+    let any = false;
+    for (const r of tr.rows) {
+      const i = idx.get(r.t); const d = ZIP3.findIndex((z) => z.z === r.zip3);
+      if (i == null || d < 0) continue;
+      datasets[d].data[i] += r.n; totals[r.zip3] = (totals[r.zip3] || 0) + r.n; any = true;
+    }
+    const labels = times.map((t) => new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: range === "min" ? "2-digit" : undefined }));
+    $("chart-empty").style.display = any ? "none" : "grid";
+    $("zip-totals").innerHTML = ZIP3.map((z) => `<span><i style="background:${z.color}"></i>${esc(z.name)}: <b>${totals[z.z] || 0}</b></span>`).join("");
+    if (!chart) {
+      Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+      Chart.defaults.font.size = 13;
+      Chart.defaults.color = "#4a4a55";
+      chart = new Chart($("chart"), {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: false }, // the swatch + total list under the chart is the legend (and the visible labels)
+            tooltip: { filter: (i) => i.raw > 0, itemSort: (a, b) => b.raw - a.raw },
+          },
+          scales: {
+            x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+            y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#ececf0" }, border: { display: false } },
+          },
+        },
+      });
+    } else {
+      chart.data.labels = labels;
+      chart.data.datasets.forEach((ds, i) => (ds.data = datasets[i].data));
+      chart.update();
+    }
+  }
+  const setRange = (r) => {
+    range = r;
+    $("r-min").setAttribute("aria-pressed", String(r === "min"));
+    $("r-hour").setAttribute("aria-pressed", String(r === "hour"));
+    renderChart();
+  };
+  $("r-min").onclick = () => setRange("min");
+  $("r-hour").onclick = () => setRange("hour");
+
+  // ---- reports (Flow 5 tables; may not exist yet) ----
+  function renderReports(r) {
+    const el = $("reports");
+    if (!r || !r.available || (!r.total && !r.spiking.length)) {
+      el.innerHTML = `<div class="muted">No reports yet. When customers forward a scam to Bouncer, it is counted here by ZIP3, with no personal details.</div>`;
+      return;
+    }
+    const zips = r.byZip3.length ? `<div class="by-zip">Last 2 days: ${r.byZip3.map((z) => `<span>${esc(zipName(z.zip3))}: <b>${z.n}</b></span>`).join("")}</div>` : "";
+    const list = r.spiking.length
+      ? `<ul class="templates">${r.spiking.map((t) => `<li><div class="t"><span class="spike">SPIKING</span>${esc(t.template)}</div>
+          <div class="m">${[t.brand, TYPE[t.scam_type] || t.scam_type, t.link_domain, t.n != null ? `${t.n} reports in 2 days` : null].filter(Boolean).map(esc).join(" · ")}</div></li>`).join("")}</ul>`
+      : `<div class="muted" style="margin-top:12px">No templates spiking right now.</div>`;
+    el.innerHTML = `<div class="counter"><div><div class="big">${fmt(r.today)}</div><div class="lbl">reports today</div></div>
+      <div><div class="big" style="color:var(--ink-2)">${fmt(r.total)}</div><div class="lbl">all time</div></div></div>${zips}${list}`;
+  }
+
+  // ---- accuracy ----
+  async function loadAccuracy() {
+    try {
+      const res = await fetch("/dashboard/accuracy", { headers: { "X-Bouncer-Dashboard": "1" } });
+      const a = await res.json();
+      const acc = a.accuracy;
+      if (!acc) { $("sets").innerHTML = `<div class="muted">config/accuracy.json not found.</div>`; return; }
+      $("acc-note").textContent = `Jev ${acc.jev_model} · updated ${acc.updated}`;
+      $("sets").innerHTML = acc.sets.map((s) => {
+        const levels = s.levels ? `<table class="levels"><thead><tr><th></th>${s.levels.columns.map((c) => `<th class="num">${esc(c)}</th>`).join("")}</tr></thead>
+          <tbody>${s.levels.rows.map((r) => `<tr><td>${esc(r.label)}</td>${r.counts.map((n) => `<td class="num">${fmt(n)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
+        return `<div class="set"><h3>${esc(s.title)}</h3><div class="ds">${esc(s.dataset)}${s.rule ? " · " + esc(s.rule) : ""} · Jev ${esc(s.jev_model || acc.jev_model)}</div>
+          ${s.metrics.map((m) => `<div class="metric"><span class="v">${esc(m.value)}</span><span class="l">${esc(m.label)}<span class="d">${esc(m.detail || "")}</span></span></div>`).join("")}
+          ${levels}</div>`;
+      }).join("");
+      const t = a.thresholds;
+      const mismatch = a.jevModelLive && acc.jev_model && a.jevModelLive !== acc.jev_model;
+      $("acc-foot").innerHTML = `Live model: <b>${esc(a.jevModelLive)}</b>${mismatch ? ` <span class="warn-text">(differs from the tested ${esc(acc.jev_model)})</span>` : " (pinned, same as tested)"}
+        · Levels: Not sure ≥ <b>${t.unsure}</b>, Likely ≥ <b>${t.likely}</b>, High ≥ <b>${t.high}</b>. Spam is reported separately, never counted as a scam or a false alarm.`;
+    } catch (e) {
+      $("sets").innerHTML = `<div class="muted">Could not load accuracy numbers.</div>`;
+    }
+  }
+
+  // ---- demo controls ----
+  let statusPinned = false;
+  const setStatus = (html) => ($("status").innerHTML = html);
+  async function post(path) {
+    const res = await fetch(path, { method: "POST", headers: { "X-Bouncer-Dashboard": "1" } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+  const ALERT = {
+    sent: "Bouncer texted the customer.",
+    no_user: "No Bouncer user has that number, so no text was sent.",
+    no_thread: "That user hasn't texted Bouncer yet, so there's no thread to warn them in.",
+    below_level: "Below Likely scam, so no text was sent.",
+    failed: "Sending the text failed (see server log).",
+  };
+  $("b-toll").onclick = async () => {
+    const b = $("b-toll"); b.disabled = true; statusPinned = true;
+    setStatus("Sending toll scam text through the network…");
+    try {
+      const v = await post("/dashboard/demo/toll");
+      setStatus(`<b>${esc(LEVEL[v.level])}</b> (${v.confidence}%) to ${esc(v.to)} in ${(v.latency_ms / 1000).toFixed(1)} s. ${esc(ALERT[v.alert] || "")}`);
+    } catch (e) { setStatus(`<span class="warn-text">${esc(e.message)}</span>`); }
+    finally { b.disabled = false; setTimeout(() => (statusPinned = false), 8000); }
+  };
+  $("b-start").onclick = async () => {
+    statusPinned = false;
+    try { renderReplay(await post("/dashboard/demo/replay/start")); } catch (e) { setStatus(`<span class="warn-text">${esc(e.message)}</span>`); }
+  };
+  $("b-stop").onclick = async () => {
+    try { const r = await post("/dashboard/demo/replay/stop"); renderReplay(r); setStatus(`Replay stopped after ${r.sent} texts.`); } catch (e) { setStatus(`<span class="warn-text">${esc(e.message)}</span>`); }
+  };
+  $("b-reset").onclick = async () => {
+    if (!confirm("Reset the demo?\n\nThis stops the replay, deletes simulated carrier texts from the last 12 hours, and hides earlier Bouncer app rows from this dashboard (they are not deleted).")) return;
+    try { const r = await post("/dashboard/demo/reset"); clearFeed(); resetAt = r.resetAt; setStatus(`Demo reset. Removed ${r.carrierDeleted} simulated texts.`); } catch (e) { setStatus(`<span class="warn-text">${esc(e.message)}</span>`); }
+  };
+
+  // ---- live stream ----
+  function connect() {
+    const live = $("live");
+    const es = new EventSource("/dashboard/stream");
+    es.addEventListener("init", (e) => {
+      const s = JSON.parse(e.data);
+      clearFeed();
+      addRows([...s.rows].reverse(), false);
+      renderStats(s.stats);
+      live.className = "live on"; live.lastElementChild.textContent = "Live";
+    });
+    es.addEventListener("rows", (e) => addRows(JSON.parse(e.data), true));
+    es.addEventListener("stats", (e) => renderStats(JSON.parse(e.data)));
+    es.onopen = () => { live.className = "live on"; live.lastElementChild.textContent = "Live"; };
+    es.onerror = () => { live.className = "live off"; live.lastElementChild.textContent = "Reconnecting…"; };
+  }
+
+  loadAccuracy();
+  connect();
+  setInterval(renderChart, 30_000); // keep the time axis moving when nothing new arrives
+})();
+</script>
+</body>
+</html>
