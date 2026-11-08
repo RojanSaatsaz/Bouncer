@@ -23,7 +23,8 @@
     "replay": "tsx --env-file=.env scripts/replay.ts",
     "test:case": "tsx --env-file=.env scripts/test-case.ts",
     "verify:contacts": "tsx --env-file=.env scripts/verify-contacts.ts",
-    "test:contacts": "tsx --env-file=.env scripts/test-contacts.ts"
+    "test:contacts": "tsx --env-file=.env scripts/test-contacts.ts",
+    "test:signup": "tsx --env-file=.env scripts/test-signup.ts"
   },
   "engines": {
     "node": ">=22"

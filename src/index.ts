@@ -9,6 +9,7 @@ import { handleInbound } from "./messages/inbound.js";
 import { handleChatCompletions } from "./voice/llm.js";
 import { handlePostCall, handleInit } from "./voice/webhooks.js";
 import { dashboardApp } from "./dashboard/app.js";
+import { signupApp } from "./signup/index.js";
 
 const app = new Hono();
 
@@ -37,6 +38,8 @@ app.post("/elevenlabs/init", (c) => handleInit(c));
 
 // Flow 7: /dashboard (+ stream, demo buttons) and /carrier/events, behind basic auth (DASHBOARD_PASSWORD).
 app.route("/", dashboardApp);
+// Public sign-up link for trying Bouncer: /join, /join/qr (for a slide), /join/bouncer.vcf.
+app.route("/", signupApp);
 
 // Railway sets PORT (pinned to 3000 in Variables to match the domain's target port). Bind 0.0.0.0.
 serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, (info) => {
