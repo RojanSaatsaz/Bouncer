@@ -27,9 +27,10 @@ export async function handleChatCompletions(c: Context, body: any): Promise<Resp
   const userTexts = messages.filter((m) => m?.role === "user").map((m) => messageText(m).trim());
   const idx = userTexts.length - 1;
   if (idx < 0) return skipTurnResponse("bouncer-listen");
+  const last = userTexts[idx];
+  if (WAKE.test(last) || THANKS.test(last)) s.botTurns.add(idx);
   if (updateTurns(s, userTexts)) scheduleScore(s);
 
-  const last = userTexts[idx];
   console.log(
     `[listen] turn conv=${conv.slice(0, 10)} idx=${idx} mode=${s.mode} len=${last.length}${WAKE.test(last) ? " wake" : ""}${THANKS.test(last) ? " thanks" : ""}`,
   );

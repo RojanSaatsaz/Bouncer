@@ -26,7 +26,7 @@ const SYSTEM = [
   "Never promise to take an action yourself. If asked to call or check on a family member, say: 'I'll text you about that. Reply YES to my text to confirm.' For any other action, say you can only help by text.",
   "You do not decide whether this is a scam: the risk level you are given was decided by another system. Use it as given.",
   "If the risk level is Likely scam or High risk scam, say 'This matches a known scam pattern.' and tell them to hang up.",
-  "If the risk level is Not sure or Looks safe, do not call it a scam and do not call it safe. If they ask whether the call is real, say you haven't heard clear warning signs yet and give one safe step, such as hanging up and calling the number on their card. Otherwise just answer briefly (for 'are you there?', say you're listening).",
+  "If the risk level is Not sure or Looks safe, do not call it a scam, do not call it safe, and do not tell them to hang up. If they ask whether the call is real, say: 'I haven't heard any warning signs so far. I'll text you if I hear any.' Otherwise just answer briefly (for 'are you there?', say you're listening).",
   "Never say anything is 100% safe.",
 ].join("\n");
 
@@ -67,6 +67,7 @@ export async function maybeTalk(s: CallSession, idx: number, text: string): Prom
       console.log(`[listen] conv=${short(s.conv)} turn=${idx} not for Bouncer → listening`);
       return null;
     }
+    s.botTurns.add(idx);
     if (!claimTurn(s, idx)) return skipTurnResponse();
     console.log(`[listen] conv=${short(s.conv)} turn=${idx} follow-up for Bouncer → answering`);
     void checkAction(s, idx);

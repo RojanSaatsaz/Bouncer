@@ -76,7 +76,7 @@ function runScore(s: CallSession): Promise<void> {
 async function scoreOnce(s: CallSession) {
   s.scoring = true;
   const version = s.version;
-  const transcript = s.turns.filter((t) => t?.trim()).join("\n");
+  const transcript = callerTranscript(s);
   try {
     if (!transcript) return;
     const [r] = await Promise.all([askJev({ transcript }, CALL_QUESTIONS, { retries: 2 }), s.identifying]);
@@ -121,6 +121,26 @@ async function scoreOnce(s: CallSession) {
   }
 }
 
+/**
+ * What Jev scores: the call without speech aimed at Bouncer. A wake turn keeps only the words before
+ * "Hey Bouncer" (on a merged call one turn can hold both speakers); thanks/follow-up turns are dropped.
+ * Otherwise "Hey Bouncer, is this real?" itself pushes Jev toward "scam".
+ */
+export function callerTranscript(s: CallSession): string {
+  return s.turns
+    .map((t, i) => {
+      if (!t?.trim() || !s.botTurns.has(i)) return t;
+      const m = t.match(WAKE_ANY);
+      return m && m.index! > 0 ? t.slice(0, m.index) : "";
+    })
+    .filter((t) => t?.trim())
+    .join("\n");
+}
+const WAKE_ANY = /\b(hey|hi|ok(ay)?|thanks?|thank you)[,.!]?\s+(bouncer|bouncers|bounce her)\b/i;
+
+/** A text alert needs someone on the call to actually ask for something (impersonation + urgency alone isn't enough). */
+const CONCRETE_ASKS = ["asks_code", "remote_access", "money_or_code"];
+
 /** Alert lines (SPEC step 6), in priority order. Each flag is texted at most once per call. */
 const FLAG_LINES: Record<string, (brand: string | null) => string> = {
   asks_code: () => "⚠️ High risk: hang up. Never read a code to someone who called you.",
@@ -152,6 +172,8 @@ async function alert(s: CallSession, transcript: string) {
   // likely_scam (impersonation alone fires on many legit calls, see docs/HANDOFF.md). A flag that
   // crossed earlier is texted as soon as the level gets there.
   if (!atLeast(s.level, "likely_scam")) return;
+  // Live false alarm (2026-11-08): two teammates chatting reached likely_scam with no ask at all.
+  if (!CONCRETE_ASKS.some((f) => s.flags.has(f))) return;
 
   const send = async (key: string, line: string) => {
     try {

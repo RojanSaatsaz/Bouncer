@@ -42,6 +42,8 @@ export interface CallSession {
   addressed: Map<number, Promise<boolean>>;
   /** Index of the last turn Bouncer answered out loud. */
   lastTalkTurn: number;
+  /** Turn indexes spoken to Bouncer (wake, thanks, follow-ups): left out of what Jev scores. */
+  botTurns: Set<number>;
   ended: boolean;
 }
 
@@ -73,6 +75,7 @@ export function getOrCreateSession(conv: string): CallSession {
       spoken: new Map(),
       addressed: new Map(),
       lastTalkTurn: -1,
+      botTurns: new Set(),
       ended: false,
     };
     sessions.set(conv, s);
