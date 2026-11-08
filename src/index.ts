@@ -38,6 +38,9 @@ serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, (info) => {
   console.log(`Bouncer listening on port ${info.port}`);
 });
 
+// Safety net: a stray rejected promise in background work (Jev/Gemini/DB) must not take the server down mid-demo.
+process.on("unhandledRejection", (err: any) => console.error("[process] unhandled rejection:", err?.message ?? err));
+
 startPhotonSocket(handleInbound);
 
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
