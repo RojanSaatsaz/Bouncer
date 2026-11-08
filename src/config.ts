@@ -95,4 +95,10 @@ export const config = {
   spikeThreshold: Math.max(1, Number(process.env.PATTERN_SPIKE_THRESHOLD) || 3),
   // Flow 7 (optional): phone that "Send toll scam to Grandma's line" targets; default is the first circle's protected user.
   demoVictimPhone: process.env.DEMO_VICTIM_PHONE?.trim() || null,
+  // Sign-up link (/join): optional event code people must enter, and a daily cap that protects Photon's
+  // shared-line limit. The Photon key needs platforms:write to create assignments.
+  join: {
+    code: process.env.JOIN_CODE?.trim() || null,
+    dailyMax: Math.max(1, Number(process.env.JOIN_DAILY_MAX) || 150),
+  },
 };
