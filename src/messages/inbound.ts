@@ -20,11 +20,12 @@ import {
 import { extractScreenshot, type Extracted } from "../detection/extract.js";
 import { isKnownContact, scoreAnswers, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
 import { MESSAGE_QUESTIONS } from "../detection/questions.js";
-import { atLeast, LEVEL_LABEL } from "../detection/risk.js";
+import { atLeast, LEVEL_LABEL, type RiskLevel } from "../detection/risk.js";
 import { writeVerdictReply, answerChat, pickFresh, topFlags, type ChatKind } from "../detection/reply.js";
-import { addUserTurn, addBouncerTurn, getHistory, setVerdict } from "./history.js";
+import { addUserTurn, addBouncerTurn, getHistory, setVerdict, markScreenshot } from "./history.js";
+import { hasLink } from "../photon/links.js";
 import { getCase, openCase, caseForModel, detectPayment, detectAmounts, setCaseContact } from "./case.js";
-import { findOfficialContact, contactLine, orgFromMessage, looksGovernment } from "../contacts/index.js";
+import { findOfficialContact, contactLine, orgFromMessage, looksGovernment, type OfficialContact } from "../contacts/index.js";
 
 const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
 
@@ -107,6 +108,15 @@ const FOLLOWUP_RE =
  * "Is this text from my bank a scam?" with nothing pasted: a question ABOUT a message, not the message.
  * Short, phrased as a question, no link, number or quote. Only used when Jev scores it below Likely.
  */
+/**
+ * iOS sends a screenshot and the words typed with it as two separate messages, picture first. A text that
+ * comes within a minute of a screenshot, with no link or long number of its own, is the user talking about
+ * that screenshot ("what is this link? is this a scam?"), not a new message to judge on its own.
+ */
+const CAPTION_WINDOW_MS = 60_000;
+const isCaption = (text: string, screenshotAt: number | null) =>
+  !!screenshotAt && Date.now() - screenshotAt < CAPTION_WINDOW_MS && text.length <= 500 && !hasLink(text) && !/\d{4,}/.test(text);
+
 const ASKS_ABOUT_MISSING_RE =
   /^\s*(is|are|was|could|can (you|u) (tell|check)|does|do (you|u) think)\b.{0,60}\b(scam|scams|legit|real|safe|fake|spam|phishing)\b[^"“]*\?*\s*$/i;
 const asksAboutMissing = (text: string) =>
@@ -155,7 +165,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
 
   if (msg.attachmentIds.length) return handleScreenshot(user, msg, say, t0);
 
-  // 1. YES / NO for an action another flow parked (verify call, loss question, call feedback, …).
+  // 1. YES / NO for an action another flow parked (verify call, loss question, …).
   // Recovery asking "Is that right?" / "anything else?" goes first: that question is the newest one.
   const yn = parseYesNo(text);
   if (yn && recoveryAwaitsYesNo(user.id) && (await handleRecoveryText(user, msg))) return;
@@ -290,6 +300,22 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
     const intent = choice(scan.jev, "intent");
     console.log(`[inbound] user ${uid} text intent=${intent.label} (${intent.confidence.toFixed(2)}) level=${scan.risk.level}`);
 
+    // The words sent along with a screenshot: answered as chat about that screenshot's verdict, so the user
+    // never gets a second, contradictory verdict for their own caption. Emergencies, "I already paid",
+    // REPORT and setup still route normally. A caption that Jev finds riskier than the screenshot itself
+    // still gets its own verdict (rule 3).
+    const screenshotLevel = (history.verdict?.source === "screenshot" ? history.verdict.level : "safe") as RiskLevel;
+    if (
+      (intent.label === "check_message" || intent.label === "question") &&
+      isCaption(text, history.screenshotAt) &&
+      !(atLeast(scan.risk.level, "likely_scam") && !atLeast(screenshotLevel, scan.risk.level))
+    ) {
+      const kind: ChatKind = history.verdict ? "followup" : "question";
+      await chat(user, text, kind, say, Date.now() + 3_000, history);
+      console.log(`[inbound] user ${uid} caption chat kind=${kind} level=${scan.risk.level} in ${Date.now() - t0} ms`);
+      return;
+    }
+
     switch (intent.label) {
       case "family_emergency":
         // Flow 3 sends the coach text itself; no reply from here. Chat memory gets a note, not the texts.
@@ -352,6 +378,7 @@ async function chat(user: User, text: string, kind: ChatKind, say: Say, deadline
 
 async function handleScreenshot(user: User, msg: InboundMessage, say: Say, t0: number) {
   // Start downloading while "Looking at it now..." is sent (the download is 1–3.5 s of the 6 s budget).
+  markScreenshot(user.id); // so the caption iOS sends right after is read as about this picture
   const downloads = msg.attachmentIds.slice(0, 3).map((id) => fetchImage(id, t0));
   downloads.forEach((p) => p.catch(() => {})); // handled below; avoids an unhandled rejection meanwhile
   await say(["Looking at it now..."], "look");
@@ -421,6 +448,9 @@ async function reply(
   sender: string | null,
   t0: number,
 ) {
+  // The real-contact lookup only needs the level and the claimed organization: it runs while the verdict
+  // is being worded, and its line follows the verdict.
+  const contact = lookupOfficialContact(scan, body, claimedBrand);
   // Wording must finish by t0 + 5.5 s; past ~4.5 s elapsed the template is used (6 s target).
   const lines = (await writeVerdictReply(scan, body, claimedBrand, { deadline: t0 + 5_500 })).filter((l) => l.trim());
   // Flow 1 step 13 / Flow 5: invite a report on Likely+ verdicts. The body stays in memory 10 min for it.
@@ -464,17 +494,21 @@ async function reply(
   await updateContactMemory(user.id, sender, scan.risk).catch((err) =>
     console.error(`[inbound] contact memory update failed: ${err?.message}`),
   );
-  await sendOfficialContact(user.id, say, scan, body, claimedBrand);
+  const c = await contact;
+  if (c) {
+    setCaseContact(user.id, c);
+    await say([contactLine(c)], "contact");
+  }
 }
 
 /**
  * After an Unsure-or-worse verdict: the real phone number and website of whoever the message claims to be,
  * so the user can check without searching. Verified directory first (instant); otherwise a live search
  * that only accepts .gov sites for government and the brand's own domain for companies (src/contacts).
- * A separate message after the verdict, so the 6 s verdict target is untouched.
+ * Never throws; null when there's nothing verified to send.
  */
-async function sendOfficialContact(userId: string, say: Say, scan: ScanResult, body: string, claimedBrand: string | null) {
-  if (!atLeast(scan.risk.level, "unsure")) return;
+async function lookupOfficialContact(scan: ScanResult, body: string, claimedBrand: string | null): Promise<OfficialContact | null> {
+  if (!atLeast(scan.risk.level, "unsure")) return null;
   const t0 = Date.now();
   try {
     let org = claimedBrand;
@@ -485,13 +519,12 @@ async function sendOfficialContact(userId: string, say: Say, scan: ScanResult, b
       org = org ?? x.org;
       hint = x.hint;
     }
-    if (!org) return;
+    if (!org) return null;
     const c = await findOfficialContact(org, { scamType: scan.scamType, hint, timeoutMs: 5_000 });
     console.log(`[inbound] official contact: ${c ? `${c.source}${c.phone ? "+phone" : ""}` : "none"} in ${Date.now() - t0} ms`);
-    if (!c) return;
-    setCaseContact(userId, c);
-    await say([contactLine(c)], "contact");
+    return c;
   } catch (err: any) {
     console.warn(`[inbound] official contact failed: ${err?.message}`);
+    return null;
   }
 }

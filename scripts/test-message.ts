@@ -2,7 +2,8 @@
 // (texts are printed, never sent). Uses live Jev + Gemini and the DB in DATABASE_URL.
 //   npm run test:message -- text "USPS: your package is on hold, update at usps-help.top"
 //   npm run test:message -- image scripts/fixtures/scam-usps.png
-//   npm run test:message -- scout            (all 30 scout messages, summary table)
+//   npm run test:message -- caption scripts/fixtures/scam-usps.png "is this a scam? what is this link?"
+//   npm run test:message -- scout           (all 30 scout messages, summary table)
 //   npm run test:message -- first "<text>"   (as a brand-new user: welcome, then a verdict if it's a message)
 // Uses the fake handle +15555550190 and deletes its rows afterwards.
 export {};
@@ -62,6 +63,13 @@ try {
   } else if (mode === "image") {
     const r = await run(null, rest.map((p) => `file:${p}`));
     origLog(`\n(${r.ms} ms)`);
+  } else if (mode === "caption") {
+    // iOS sends "screenshot + typed words" as two messages, picture first: one verdict, then a chat answer.
+    const [file, ...words] = rest;
+    const a = await run(null, [`file:${file}`]);
+    const b = await run(words.join(" "));
+    const verdicts = [...a.lines, ...b.lines].filter((l) => /^(✅|🤔|⚠️)/u.test(l));
+    origLog(`\n(${a.ms} + ${b.ms} ms) verdict lines: ${verdicts.length} ${verdicts.length === 1 ? "OK" : "FAIL (want exactly 1)"}`);
   } else if (mode === "scout") {
     const csv = fs.readFileSync("data/scout_test_messages.csv", "utf8").trim().split("\n").slice(1);
     const rows = csv.map((line) => {

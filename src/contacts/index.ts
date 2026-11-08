@@ -10,6 +10,7 @@ import path from "node:path";
 import { query, one } from "../db.js";
 import { generateJson } from "../detection/gemini.js";
 import { searchOfficialContact, type ContactKind } from "./search.js";
+import { allowContact, allowDomain } from "./allow.js";
 
 export interface OfficialContact {
   name: string;
@@ -50,6 +51,13 @@ const data: { entries: DirEntry[]; resources: Resource[] } = (() => {
 })();
 
 export const RESOURCES: Resource[] = data.resources;
+
+// The outgoing link/phone filters (src/photon/links.ts) let every verified site and number through.
+for (const e of data.entries) {
+  allowDomain(e.domain);
+  allowContact(e.website, e.phone);
+}
+for (const r of data.resources) allowContact(r.website, r.phone);
 export const resource = (key: string) => RESOURCES.find((r) => r.key === key) ?? null;
 
 const norm = (s: string) => ` ${s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim()} `;
@@ -103,6 +111,7 @@ export async function findOfficialContact(
     );
     if (row) {
       const c = row.website ? { name: row.name ?? name, website: row.website, phone: row.phone, kind: (row.kind as ContactKind) ?? kind, source: "search" as const } : null;
+      if (c) allowContact(c.website, c.phone);
       mem.set(key, { c, at: Date.now() });
       return c;
     }
@@ -113,6 +122,7 @@ export async function findOfficialContact(
   const t0 = Date.now();
   const found = await searchOfficialContact(name, kind, { hint: opts.hint, timeoutMs: opts.timeoutMs });
   const c: OfficialContact | null = found ? { name: found.name, website: found.website, phone: found.phone, kind, source: "search" } : null;
+  if (c) allowContact(c.website, c.phone);
   console.log(`[contacts] search kind=${kind} → ${c ? `site${c.phone ? "+phone" : ""}` : "nothing verified"} in ${Date.now() - t0} ms`);
   mem.set(key, { c, at: Date.now() });
   query(

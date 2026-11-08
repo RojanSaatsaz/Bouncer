@@ -3,7 +3,7 @@
 // when that user texts YES / NO. Lives in memory only, expires after 10 minutes.
 
 export interface PendingAction {
-  kind: string; // e.g. "verify_call", "circle_alert", "call_feedback"
+  kind: string; // e.g. "verify_call", "circle_alert"
   data: Record<string, unknown>;
   expiresAt: number;
 }
@@ -24,7 +24,7 @@ export function registerPendingHandler(kind: string, handler: Handler) {
 
 /**
  * Parks an action until the user texts YES / NO. Each user has one slot. Low-priority actions
- * (e.g. "call_feedback") pass `ifFree: true` so they never overwrite a live action such as
+ * (e.g. low-priority questions) pass `ifFree: true` so they never overwrite a live action such as
  * "verify_call"; returns false when they were skipped.
  */
 export function setPending(
