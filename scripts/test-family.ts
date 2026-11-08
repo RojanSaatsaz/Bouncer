@@ -408,6 +408,28 @@ try {
     await resolvePending(ids.mom, "no");
     check("Grandma (alerts off) got no circle alert", textsTo(SPACE.gma, t).length === 0, textsTo(SPACE.gma, t).join(" | "));
 
+    // The person the scammer used (Mom) says the word: she gets her own text, not "Grandma received… Mom is safe."
+    t = mark();
+    const vm = await textEmergency("Mom called me crying, she says she's in jail and needs bail");
+    const vmRow = (await one("SELECT relative_id FROM verifications WHERE id = $1", [vm.id]))!;
+    check("Grandma's emergency about Mom → calls Mom", vmRow.relative_id === (await one("SELECT id FROM circle_members WHERE circle_id = $1 AND name = 'Mom'", [ids.circle]))!.id);
+    await converse(vm, ["Yes I'm fine, why?", "purple elephant"]);
+    check("status verified_safe", await waitFor(async () => (await statusOf(vm.id)) === "verified_safe"));
+    await waitFor(() => peekPending(ids.gma)?.kind === "loss_question");
+    const momNote = textsTo(SPACE.mom, t);
+    check(
+      "Mom gets her own text right away",
+      momNote.length === 1 && momNote[0] === "Heads up: a scammer told Grandma you were in trouble. You gave the family word, so I told Grandma you're safe and it's a scam.",
+      momNote.join(" | "),
+    );
+    t = mark();
+    await resolvePending(ids.gma, "no");
+    await sleep(300);
+    const momAfter = textsTo(SPACE.mom, t);
+    check("Mom gets no third-person 'Mom is safe' alert", !momAfter.some((x) => x.includes("received a likely family-emergency scam")), momAfter.join(" | "));
+    check("Mom told no money was sent", momAfter.includes("Update: Grandma says no money was sent."), momAfter.join(" | "));
+    await family.onVerifyCallEnded(vm.conv, { failed: false });
+
     // Instant family alerts for any likely scam.
     t = mark();
     const n1 = await notifyFamily({ userId: ids.gma, level: "likely_scam", scamType: "bank_or_card", source: "call" });

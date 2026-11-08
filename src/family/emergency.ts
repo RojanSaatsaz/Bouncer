@@ -311,6 +311,8 @@ export async function onVerificationResult(r: {
   // Step 10 before the text goes out, so a fast NO/YES can't miss the pending slot.
   setPending(em.userId, "loss_question", { emergencyId: em.id });
   await textProtected(em, "result", [result[r.status], "Did you send money or share any codes? Reply NO or YES."]);
+  // The person the scammer used gets their own text right away (alerts on or off), not the generic alert.
+  await textRelative(em, r.status);
 
   const target = em;
   clearTimeout(em.alertTimer);
@@ -331,9 +333,16 @@ registerPendingHandler("loss_question", async (userId, data, answer) => {
     await textProtected(em, "loss-no", ["Good. Never send money or codes to someone who calls in a hurry."]);
   }
   if (!em.alertSent) {
-    await sendCircleAlert(em);
+    await sendCircleAlert(em); // already says "No money was sent." on a NO
+    // The relative isn't in that alert (they got their own text), so tell them too.
+    const relId = em.relative?.user_id;
+    if (answer === "no" && relId && relId !== em.userId) {
+      await textUser(relId, [`Update: ${em.protectedName} says no money was sent.`], `family:${em.id}:relative-update`).catch((err) =>
+        console.error(`[family] update to relative failed: ${err?.message}`),
+      );
+    }
   } else {
-    if (answer === "no") await alertFamily(em, [`Update: ${em.protectedName} says no money was sent.`], "update");
+    if (answer === "no") await alertFamily(em, [`Update: ${em.protectedName} says no money was sent.`], "update", { includeRelative: true });
     if (em.eventId) await query("UPDATE events SET flags = $2 WHERE id = $1", [em.eventId, eventFlags(em)]);
   }
   return true;
@@ -365,10 +374,48 @@ async function sendCircleAlert(em: Emergency) {
   await logEvent(em, count);
 }
 
-/** Texts every family member who turned family alerts on (never the targeted person). */
-async function alertFamily(em: Emergency, lines: string[] | ((viewerIsOrganizer: boolean) => string[]), tag: string): Promise<number> {
+/**
+ * Texts the family member the scammer claimed was in trouble (Y), in their own words: they were checked on,
+ * and what the targeted person (X) was told. Sent whatever Y's alert switch says: it's about them.
+ */
+async function textRelative(em: Emergency, status: VerifyStatus): Promise<void> {
+  const y = em.relative;
+  if (!y?.user_id || !em.circleId || y.user_id === em.userId) return;
+  const xRow = await one<{ name: string; title: string | null; relationship: string | null }>(
+    "SELECT name, title, relationship FROM circle_members WHERE circle_id = $1 AND user_id = $2 ORDER BY created_at LIMIT 1",
+    [em.circleId, em.userId],
+  );
+  const yIsOrganizer = y.user_id === em.organizerId;
+  const X = xRow ? labelFor(xRow, yIsOrganizer) : em.protectedName;
+  const lead = `Heads up: a scammer told ${X} you were in trouble.`;
+  const text: Record<VerifyStatus, string> = {
+    verified_safe: `${lead} You gave the family word, so I told ${X} you're safe and it's a scam.`,
+    verified_needs_help: `${lead} You said you need help, so I asked ${X} to call you back on your own number. If it's an emergency, call 911.`,
+    failed: `${lead} I called your number to check, but whoever answered couldn't give the family word. Please call ${X} yourself.`,
+    unreachable: `${lead} I tried your phone to check on you. Please call ${X} to say you're okay.`,
+  };
+  const ok = await textUser(y.user_id, [text[status]], `family:${em.id}:relative`).catch((err) => {
+    console.error(`[family] text to relative ${short(y.id)} failed: ${err?.message}`);
+    return false;
+  });
+  console.log(`[family] relative ${short(y.id)} told about the scam: ${ok ? "sent" : "not sent (no thread)"}`);
+}
+
+/**
+ * Texts every family member who turned family alerts on. Never the targeted person, and never the relative
+ * the scammer used (they got their own text) unless `includeRelative` (the "no money was sent" update).
+ */
+async function alertFamily(
+  em: Emergency,
+  lines: string[] | ((viewerIsOrganizer: boolean) => string[]),
+  tag: string,
+  opts: { includeRelative?: boolean } = {},
+): Promise<number> {
   if (!em.circleId) return 0;
-  const recipients = await getAlertRecipients(em.circleId, em.userId);
+  const relId = em.relative?.user_id;
+  let recipients = await getAlertRecipients(em.circleId, em.userId);
+  if (relId && !opts.includeRelative) recipients = recipients.filter((g) => g.user_id !== relId);
+  else if (relId && opts.includeRelative && !recipients.some((g) => g.user_id === relId) && em.relative) recipients.push(em.relative);
   let sent = 0;
   for (const g of recipients) {
     const text = typeof lines === "function" ? lines(g.user_id === em.organizerId) : lines;

@@ -362,7 +362,13 @@ try {
     await send("sam", "no");
     const expected = "Sam received a likely family-emergency scam. Maria is safe. No money was sent.";
     check("Grandma (alerts on) alerted by first name", textsTo("gma", ta).includes(expected), textsTo("gma", ta).join(" | "));
-    check("Mom (alerts on) alerted", textsTo("mom", ta).includes(expected), textsTo("mom", ta).join(" | "));
+    // Mom is the person the scammer used: her own text after the call, then the no-money update; never "Maria is safe".
+    check(
+      "Mom (the relative checked) got her own text",
+      textsTo("mom", t).includes("Heads up: a scammer told Sam you were in trouble. You gave the family word, so I told Sam you're safe and it's a scam."),
+      textsTo("mom", t).join(" | "),
+    );
+    check("Mom gets the no-money update, not the third-person alert", textsTo("mom", ta).join("|") === "Update: Sam says no money was sent.", textsTo("mom", ta).join(" | "));
     check("Jake (alerts off) not alerted", textsTo("jake", ta).length === 0);
     check("Sam (the target) gets no circle alert", !textsTo("sam", ta).some((x) => x.includes("received a likely")));
     await family.onVerifyCallEnded(vv.conv, { failed: false });
