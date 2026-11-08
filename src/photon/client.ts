@@ -56,9 +56,12 @@ export async function sendLines(
 /** Downloads attachment bytes into memory. Never write them to disk (CLAUDE.md rule 1). */
 export async function downloadAttachment(attachmentId: string): Promise<{ data: Buffer; contentType: string }> {
   try {
-    const meta = await photon.projects.getAttachment({ path: { id: projectId, attachmentId } });
-    const blob = await photon.projects.downloadAttachment({ path: { id: projectId, attachmentId } });
-    return { data: Buffer.from(await blob.arrayBuffer()), contentType: meta.contentType || blob.type || "image/jpeg" };
+    // Metadata (for contentType) and bytes in parallel: sequential took ~3.3 s for a 326 KB PNG.
+    const [meta, blob] = await Promise.all([
+      photon.projects.getAttachment({ path: { id: projectId, attachmentId } }).catch(() => null),
+      photon.projects.downloadAttachment({ path: { id: projectId, attachmentId } }),
+    ]);
+    return { data: Buffer.from(await blob.arrayBuffer()), contentType: meta?.contentType || blob.type || "image/jpeg" };
   } catch (err) {
     throw describe(err, "downloadAttachment");
   }
