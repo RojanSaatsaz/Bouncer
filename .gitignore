@@ -1,0 +1,66 @@
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+ 
+# --- Dependencies ---
+node_modules/
+.pnpm-store/
+ 
+# --- Build output ---
+dist/
+build/
+out/
+.next/
+.vite/
+*.tsbuildinfo
+console/dist/
+server/dist/
+ 
+# --- Dataset (Flow 6): keep the raw CSV out, keep the split and results that matter ---
+data/*
+!data/holdout.json
+!data/.gitkeep
+eval_results*.csv
+ 
+# --- Local database / Docker ---
+pgdata/
+*.sqlite
+*.sqlite3
+*.db
+ 
+# --- Logs and test output ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+coverage/
+.nyc_output/
+ 
+# --- Recordings and screenshots made while testing ---
+recordings/
+*.wav
+*.mp3
+*.m4a
+screenshots/
+ 
+# --- Tooling caches ---
+.cache/
+.turbo/
+.eslintcache
+.railway/
+ 
+# --- Editors and OS ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+ 
+Claude finished the response
