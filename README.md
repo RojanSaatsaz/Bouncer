@@ -64,8 +64,8 @@ flowchart LR
 |---|---|
 | 1,160 held-out texts (Mendeley SMS phishing set), scored once | **Caught 104 of 106 scams (98%)**; flagged **19 of 967 normal texts (2%)** |
 | 30 hand-written current U.S. texts (tolls, Zelle, Coinbase, jobs) | Flagged 16 of 17 scams; none of the 17 called "Looks safe" |
-| 430 scam call scripts | All scored Likely scam or higher; **326 (76%)** got a warning text under the current alert rule |
-| 37 realistic multi-turn scam calls | **16** got a warning text under the current rule (36 under the older rule, which alerted more readily) |
+| 430 scam call scripts | All scored Likely scam or higher; **326 (76%)** got a warning text |
+| 37 realistic multi-turn scam calls | **16** got a warning text |
 | 22 normal calls | **0 false alarms** (no warning texts) |
 
 The text numbers were measured before a later rule that cuts false alarms further. On calls, the current rule only sends a warning text once someone actually asks for money, a code or access to your device, which trades some missed alerts for fewer false ones; the 22 normal calls in the test are easy ones. Methods, thresholds and caveats are in [docs/EVAL.md](docs/EVAL.md), [docs/EVAL_CALLS.md](docs/EVAL_CALLS.md) and [docs/EVAL_ARCHIVE.md](docs/EVAL_ARCHIVE.md).
