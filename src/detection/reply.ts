@@ -7,7 +7,7 @@ import { generateJson, generate } from "./gemini.js";
 import { SCAM_TYPES } from "./questions.js";
 import { LEVEL_LABEL, type RiskLevel } from "./risk.js";
 import type { ScanResult } from "./scan.js";
-import { voiceNumberForText } from "../users.js";
+import { voiceNumberForText, textNumberForText } from "../users.js";
 import type { Turn, VerdictMemo } from "../messages/history.js";
 
 const EMOJI: Record<RiskLevel, string> = { safe: "✅", unsure: "🤔", likely_scam: "⚠️", high_risk: "⚠️" };
@@ -217,7 +217,7 @@ export async function writeVerdictReply(
 /** What Bouncer really does. The chat model may only state these (no invented features). */
 const FACTS = [
   "Checking messages: the user pastes a text, email, DM or link, or sends a screenshot (up to 3 at once). Bouncer answers with a verdict (Looks safe, Not sure, Likely scam, High risk scam) and how confident it is, the red flags, and one safe next step. A scam-scoring model makes the verdict; it can be wrong, so it never says anything is 100% safe.",
-  `Bouncer's phone number is ${voiceNumberForText()}. Whenever calling or merging Bouncer comes up, write this number out so the user can tap it.`,
+  `Bouncer has two different numbers. Texting number (this iMessage chat, screenshots, and what family members text to join): ${textNumberForText()}. Call number (calling Bouncer or merging it into a call): ${voiceNumberForText()}. Calls to the texting number and texts to the call number don't reach Bouncer. If the user asks for Bouncer's number without saying which, give both and say which is which. Whenever calling or merging Bouncer comes up, write the call number out so the user can tap it.`,
   "Calls: the user can call Bouncer's number, or during a suspicious call tap Add Call, pick Bouncer, then Merge Calls. Bouncer stays silent, listens, and texts warnings here. Texting LISTEN first tells Bouncer to expect a merged call in the next 2 minutes. Saying \"Hey Bouncer\" on the call lets the user ask it something out loud; \"Thanks Bouncer\" makes it go quiet again. On a call it never says private info out loud, because a scammer may be listening; it texts it instead.",
   "Nothing happens from voice alone: calling a relative or alerting the family needs a YES by text, because a scammer on a merged call could say \"Hey Bouncer\" too.",
   "Replying YES turns on call protection and alerts.",

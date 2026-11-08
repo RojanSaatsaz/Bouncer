@@ -17,10 +17,20 @@ export interface User {
   created_at: Date;
 }
 
+/** A phone number formatted for a text ("(617) 993-9248"), or the raw value if it isn't one (e.g. an Apple ID email). */
+function formatForText(raw: string): string {
+  const p = parsePhoneNumberFromString(raw, "US");
+  return p?.isValid() ? (p.countryCallingCode === "1" ? p.formatNational() : p.formatInternational()) : raw;
+}
+
 /** Bouncer's voice number for texts, e.g. "(617) 993-9248": iMessage turns it into a tap-to-call link. */
 export function voiceNumberForText(): string {
-  const p = parsePhoneNumberFromString(config.photon.voiceNumber, "US");
-  return p?.isValid() ? (p.countryCallingCode === "1" ? p.formatNational() : p.formatInternational()) : config.photon.voiceNumber;
+  return formatForText(config.photon.voiceNumber);
+}
+
+/** Bouncer's iMessage line (where users text it). A different number from the voice line. */
+export function textNumberForText(): string {
+  return formatForText(config.photon.imessageHandle);
 }
 
 /** E.164 for US-default numbers, or null if it isn't a phone number (e.g. an Apple ID email). */
