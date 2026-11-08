@@ -125,6 +125,9 @@ CREATE TABLE IF NOT EXISTS eval_results (
   created_at         timestamptz NOT NULL DEFAULT now(),
   UNIQUE (run_id, dataset, row_index)
 );
+
+-- Our agent's Photon user id on the line (incoming receivedBy.id): the senderId for alerts into space_id.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS photon_sender_id text;
 `;
 
 try {
