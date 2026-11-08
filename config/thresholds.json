@@ -1,12 +1,12 @@
 {
-  "jev_model": null,
+  "jev_model": "jev-1.14.0",
   "unsure": 0.35,
-  "likely": 0.6,
-  "high": 0.85,
+  "likely": 0.62,
+  "high": 0.805,
   "asks_code_severe": 0.8,
   "combo_severe": 0.6,
   "known_contact_discount": 0.15,
   "flag": 0.6,
   "callback_flag": 0.7,
-  "note": "Spec defaults (Flow 1 step 8). Replaced by `npm run eval -- tune` (Flow 6 step 4)."
+  "note": "Tuned 2026-11-08 by `npm run eval -- tune` on 600 train rows (420 ham, 150 smishing, 30 spam; seed 42) with jev-1.14.0. See docs/EVAL.md."
 }
