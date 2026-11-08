@@ -248,6 +248,7 @@ async function alert(s: CallSession, transcript: string, streak: number) {
     pending.includes("impersonation") ? brandFrom(transcript, s, userId) : Promise.resolve(null),
     wordAlerts(s, userId, keys, level, transcript),
   ]);
+  if (brand) s.brand = brand; // kept for the post-call case file (messages/case.ts)
 
   let sentFlagLine = false;
   for (const f of pending) {

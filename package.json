@@ -20,7 +20,8 @@
     "eval": "tsx --env-file=.env scripts/eval.ts",
     "eval:archive": "tsx --env-file=.env scripts/eval-archive.ts",
     "eval:calls": "tsx --env-file=.env scripts/eval-calls.ts",
-    "replay": "tsx --env-file=.env scripts/replay.ts"
+    "replay": "tsx --env-file=.env scripts/replay.ts",
+    "test:case": "tsx --env-file=.env scripts/test-case.ts"
   },
   "engines": {
     "node": ">=22"

@@ -7,8 +7,11 @@ import { onVerifyCallEnded } from "../family/index.js";
 import { setPending, registerPendingHandler } from "../pending.js";
 import { getUserById, textUser } from "../users.js";
 import { logEvent } from "../detection/scan.js";
-import { alertTexts } from "./score.js";
+import { alertTexts, callerTranscript } from "./score.js";
 import { writeCallSummary } from "./summary.js";
+import { atLeast } from "../detection/risk.js";
+import { openCase, detectPayment, detectAmounts } from "../messages/case.js";
+import { addBouncerTurn } from "../messages/history.js";
 
 /** Fields we read from the webhook body. Shapes per https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks */
 export interface PostCallEvent {
@@ -23,6 +26,13 @@ export interface PostCallEvent {
 }
 
 const short = (s: string) => s.slice(0, 12);
+/** First `max` characters, cut at a sentence end when possible. */
+const clip = (t: string, max: number) => {
+  const flat = t.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const end = flat.lastIndexOf(". ", max);
+  return (end > max / 2 ? flat.slice(0, end + 1) : flat.slice(0, max)) + " …";
+};
 
 export async function onCallEnded(evt: PostCallEvent): Promise<void> {
   const type = evt.type ?? "";
@@ -71,6 +81,24 @@ async function finishListenCall(
       ? Math.round(payloadSecs)
       : Math.round((Date.now() - s.startedAt) / 1000);
 
+  // The call's key facts become the user's active case before the transcript is dropped, so their next
+  // texts ("I already paid", "klarna") are understood. Code reads the transcript here; no model call, and
+  // nothing but labels, amounts and a payment method is kept (memory only, 30 min, rule 1).
+  if (flags.length || atLeast(s.level, "unsure")) {
+    const transcript = callerTranscript(s);
+    const c = openCase(s.userId, {
+      source: "call",
+      level: s.level,
+      scamType: s.scamType,
+      flags: [...s.flags],
+      brand: s.brand,
+      payment: detectPayment(transcript),
+      amounts: detectAmounts(transcript),
+      durationS,
+    });
+    console.log(`[post-call] conv=${short(conv)} case opened: payment=${c.payment?.method ?? "none"} amounts=${c.amounts.length}`);
+  }
+
   const eventId = await logEvent({
     userId: s.userId,
     source: "call",
@@ -115,6 +143,9 @@ async function finishListenCall(
     `[post-call] conv=${short(conv)} summary=${summary.source}${summary.reason ? ` (${summary.reason})` : ""} chars=${summary.text.length} ${summary.ms}ms asked=${asked}`,
   );
   await textUser(s.userId, [summary.text], keyPrefix);
+  // Chat memory gets a short note of what Bouncer texted (the case already holds the facts), so a
+  // follow-up like "what should I do now?" isn't answered cold. Memory only, like every chat turn.
+  addBouncerTurn(s.userId, `[Bouncer texted a call summary] ${clip(summary.text, 320)}`);
 }
 
 // Always handled (returns true): the feedback row is stored and the user gets a thank-you text.

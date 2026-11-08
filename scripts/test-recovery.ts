@@ -13,7 +13,9 @@ const AGENT = "tsp-agent";
 const { query, pool } = await import("../src/db.js");
 const { getOrCreateUser, saveConversation, getUserById } = await import("../src/users.js");
 const { dryRunOutbox } = await import("../src/photon/client.js");
-const { startRecovery, handleRecoveryText, hasActiveRecovery, saysAlreadyPaid } = await import("../src/recovery/index.js");
+const { startRecovery, handleRecoveryText, hasActiveRecovery, saysAlreadyPaid, recoveryAwaitsYesNo } = await import("../src/recovery/index.js");
+const { openCase, closeCase } = await import("../src/messages/case.js");
+const ALSO_RE = /^One more check: did you also share/;
 
 let failures = 0;
 const check = (name: string, cond: unknown, detail?: string) => {
@@ -64,10 +66,18 @@ const lastEvent = () =>
 const eventCount = () =>
   query("SELECT count(*)::int AS c FROM events WHERE user_id = $1", [userId]).then((r) => r.rows[0].c as number);
 
-/** Walks DONE/NEXT through the whole checklist from step 2; checks one text per step and the end message. */
-async function walk(total: number, loss: string, words = ["DONE", "next", "Skip", "done"]) {
+/**
+ * Walks DONE/NEXT through the whole checklist from step 2; checks one text per step and the end message.
+ * Before the last (reporting) step Bouncer asks once whether anything else was shared: answered NO.
+ */
+async function walk(total: number, loss: string, words = ["DONE", "next", "Skip", "done"], expectAlso = true) {
   for (let step = 2; step <= total; step++) {
-    const [ok, texts] = await reply(words[(step - 2) % words.length]);
+    let [ok, texts] = await reply(words[(step - 2) % words.length]);
+    if (step === total && expectAlso) {
+      check("also-question before the last step", ok && ALSO_RE.test(texts[0] ?? ""), texts.join(" | "));
+      check("recovery waits for YES/NO", recoveryAwaitsYesNo(userId));
+      [ok, texts] = await reply("no");
+    }
     check(`step ${step}/${total} sent once`, ok && texts.length >= 1 && texts[0].startsWith(`Step ${step} of ${total}:`), texts.join(" | "));
     check(`step ${step} ends with DONE/NEXT prompt`, texts.at(-1)?.endsWith("Reply DONE when you've done it, or NEXT to skip."));
   }
@@ -89,8 +99,10 @@ try {
   check("no amount echoed", !texts.some((t) => t.includes("500")));
   const [, t2] = await reply("DONE");
   check("step 2 = keep cards and receipt", /^Step 2 of 3: Keep the gift cards/.test(t2[0] ?? ""), t2[0]);
-  const [, t3] = await reply("NEXT");
-  check("step 3 = 7726 + ReportFraud.ftc.gov", /7726/.test(t3[0] ?? "") && /ReportFraud\.ftc\.gov/.test(t3[0] ?? ""), t3[0]);
+  const [, tAlso] = await reply("NEXT");
+  check("also-question before the last step", ALSO_RE.test(tAlso[0] ?? ""), tAlso[0]);
+  const [, t3] = await reply("no");
+  check("NO → step 3 = 7726 + ReportFraud.ftc.gov", /^Step 3 of 3/.test(t3[0] ?? "") && /7726/.test(t3[0] ?? "") && /ReportFraud\.ftc\.gov/.test(t3[0] ?? ""), t3[0]);
   const [okEnd, tEnd] = await reply("done");
   check("end message", okEnd && tEnd[0] === "That's everything. You did the right things fast.", tEnd.join(" | "));
   let ev = await lastEvent();
@@ -143,6 +155,59 @@ try {
   check("new one: entered_password step 1", /^Step 1 of 4: Change that password now/.test(texts[0] ?? ""), texts.join(" | "));
   const [okC] = await reply("cancel");
   check("cancel consumed", okC && !hasActiveRecovery(userId));
+
+  section("G. case from a call (Klarna) → confirm → YES → pay-later steps → also: SSN → SSN steps");
+  openCase(userId, {
+    source: "call", level: "likely_scam", scamType: "other", flags: ["money_or_code", "urgency_secrecy"], brand: null,
+    payment: { method: "bnpl", label: "Klarna" }, amounts: ["$5,000", "$1,500"], durationS: 120,
+  });
+  texts = await start("I already paid");
+  check("confirm question names Klarna and the call", texts.length === 1 && /paid with Klarna after that call\. Is that right\? Reply YES/.test(texts[0] ?? ""), texts.join(" | "));
+  check("no 9-option menu", !/Reply 1 clicked a link/.test(texts[0] ?? ""));
+  check("no amount echoed", !texts.some((t) => /5,000|1,500/.test(t)));
+  check("waits for YES/NO", recoveryAwaitsYesNo(userId));
+  const [okY, tY] = await reply("yes");
+  check("YES → Klarna step 1 of 3", okY && /^Step 1 of 3: Open the Klarna app yourself/.test(tY[0] ?? ""), tY.join(" | "));
+  const [, tK2] = await reply("done");
+  check("step 2 names Klarna payments", /^Step 2 of 3: Klarna takes its payments/.test(tK2[0] ?? "") && /more Klarna payments/.test(tK2[0] ?? ""), tK2[0]);
+  const [, tAlsoG] = await reply("done");
+  check("also-question", ALSO_RE.test(tAlsoG[0] ?? ""), tAlsoG.join(" | "));
+  const [okSsn, tSsn] = await reply("I gave them my social security number too");
+  check("SSN answer → SSN step 1 of 3", okSsn && /^Step 1 of 3: Go to IdentityTheft\.gov/.test(tSsn[0] ?? ""), tSsn.join(" | "));
+  await walk(3, "paid_bnpl,loss:shared_ssn", ["done"], false);
+  closeCase(userId);
+
+  section("H. no case → menu → free text \"klarna link\" → pay-later steps");
+  texts = await start("ugh I think I messed up, can you help");
+  check("menu lists Klarna as 10", /10 Klarna, Afterpay or Affirm/.test(texts[0] ?? ""), texts[0]);
+  const [okKl, tKl] = await reply("klarna link");
+  check("\"klarna link\" consumed → Klarna step 1", okKl && /^Step 1 of 3: Open the Klarna app/.test(tKl[0] ?? ""), tKl.join(" | "));
+  await reply("stop");
+
+  section("I. menu → \"4, 9\" → card then SSN, no also-question");
+  texts = await start(undefined, "family");
+  const [ok49, t49] = await reply("4, 9");
+  check("\"4, 9\" → card step 1 of 2 (more queued)", ok49 && /^Step 1 of 2: Lock your card/.test(t49[0] ?? ""), t49.join(" | "));
+  await reply("done"); // card step 2 + script
+  const [, tS1] = await reply("done");
+  check("then SSN step 1 of 3", /^Step 1 of 3: Go to IdentityTheft\.gov/.test(tS1[0] ?? ""), tS1.join(" | "));
+  await walk(3, "paid_card,loss:shared_ssn", ["done"], false);
+
+  section("J. case → confirm → NO → menu; menu answer \"10\"");
+  openCase(userId, {
+    source: "text", level: "high_risk", scamType: "bank_or_card", flags: ["money_or_code"], brand: "Chase",
+    payment: { method: "bank_or_p2p", label: "Zelle" }, amounts: [], durationS: null,
+  });
+  texts = await start("I already paid");
+  check("confirm names Zelle and the message", /paid with Zelle for that message\. Is that right\?/.test(texts[0] ?? ""), texts.join(" | "));
+  const [okN, tN] = await reply("no");
+  check("NO → menu", okN && /^Okay\. What happened\?/.test(tN[0] ?? ""), tN.join(" | "));
+  const [ok10, t10] = await reply("10");
+  check("\"10\" → generic pay-later step 1", ok10 && /^Step 1 of 3: Open the pay-later app you used \(Klarna, Afterpay or Affirm\)/.test(t10[0] ?? ""), t10.join(" | "));
+  const [, t10b] = await reply("done");
+  check("generic step 2 wording", /^Step 2 of 3: That service takes its payments/.test(t10b[0] ?? "") && /more of those payments/.test(t10b[0] ?? ""), t10b[0]);
+  await reply("cancel");
+  closeCase(userId);
 
   section("F. spoken trigger regex");
   for (const t of [

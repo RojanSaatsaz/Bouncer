@@ -14,6 +14,8 @@ export interface CallSession {
   level: RiskLevel;
   p: number;
   scamType: string | null;
+  /** Company or agency the caller claimed to be (from the impersonation alert's lookup), for the case file. */
+  brand: string | null;
   /** Flag names that have crossed 0.7 and been alerted on. */
   alerted: Set<string>;
   alertCount: number;
@@ -98,6 +100,7 @@ export function getOrCreateSession(conv: string): CallSession {
       level: "safe",
       p: 0,
       scamType: null,
+      brand: null,
       alerted: new Set(),
       alertCount: 0,
       startedAt: Date.now(),

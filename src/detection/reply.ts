@@ -9,6 +9,7 @@ import { LEVEL_LABEL, type RiskLevel } from "./risk.js";
 import type { ScanResult } from "./scan.js";
 import { voiceNumberForText, textNumberForText } from "../users.js";
 import type { Turn, VerdictMemo } from "../messages/history.js";
+import { caseForModel, type CaseFile } from "../messages/case.js";
 
 const EMOJI: Record<RiskLevel, string> = { safe: "✅", unsure: "🤔", likely_scam: "⚠️", high_risk: "⚠️" };
 
@@ -257,7 +258,11 @@ export type ChatKind = "smalltalk" | "followup" | "question";
 
 export interface ChatContext {
   turns: Turn[];
+  /** Compressed older turns (history.ts), if the chat got long. */
+  summary?: string | null;
   verdict: VerdictMemo | null;
+  /** The active scam case (the call or message Bouncer just saw): facts only, decided by Jev and code. */
+  case?: CaseFile | null;
   kind: ChatKind;
   /** No conversation in memory and not a brand-new user: a light "here's what I do" is fine once. */
   firstContact?: boolean;
@@ -324,7 +329,7 @@ const FAQ: Array<[RegExp, string[]]> = [
   [
     /\b(privacy|private|my data|stor(e|ed|ing)|save[sd]?|keep|record|who (can )?see|sell|(with|to) my (messages|texts|screenshots|info|calls))\b/i,
     [
-      "I don't save the messages, screenshots or calls I check. Screenshots are read and then dropped. I only keep the type of check, the risk level and the names of red flags. Our chat is remembered for 30 minutes so I can follow up, then it's gone.",
+      "I don't save the messages, screenshots or calls I check. Screenshots are read and then dropped. I only keep the type of check, the risk level and the names of red flags. Our chat, and the key facts of a scam I just checked (like the type of scam and how they asked to be paid), are remembered for 30 minutes so I can follow up, then they're gone.",
     ],
   ],
   [
@@ -415,6 +420,10 @@ export async function answerChat(text: string, ctx: ChatContext): Promise<string
   const prompt =
     `first_contact: ${ctx.firstContact ? "yes" : "no"}\n` +
     (ctx.verdict ? `last_check (from Bouncer's scam checker; explain it, never change it): ${describeVerdict(ctx.verdict)}\n` : "last_check: none\n") +
+    (ctx.case
+      ? `active_case (what Bouncer saw on the user's ${ctx.case.source === "call" ? "call" : "message"}; use it to understand short replies, never re-judge it): ${JSON.stringify(caseForModel(ctx.case))}\n`
+      : "") +
+    (ctx.summary ? `\nEarlier in this chat (notes): ${ctx.summary}\n` : "") +
     `\nConversation so far (oldest first):\n${convo || "(nothing yet)"}\n\n` +
     `New message from the user: ${JSON.stringify(text.slice(0, 1000))}\n\nWrite Bouncer's reply, plain text only.`;
   try {

@@ -2,7 +2,7 @@
 // Wording only, no logic. Plain words, sixth-grade reading level.
 import type { JevQuestion } from "../detection/jev.js";
 
-/** Menu order: "1" = clicked_only … "9" = shared_ssn. */
+/** Menu order: "1" = clicked_only … "9" = shared_ssn, "10" = paid_bnpl. */
 export const LOSS_TYPES = [
   "clicked_only",
   "entered_password",
@@ -13,6 +13,7 @@ export const LOSS_TYPES = [
   "paid_bank_or_p2p",
   "installed_app",
   "shared_ssn",
+  "paid_bnpl",
 ] as const;
 export type LossType = (typeof LOSS_TYPES)[number];
 
@@ -26,19 +27,36 @@ export const LOSS_QUESTION: Record<string, JevQuestion> = {
       clicked_only: "They only clicked or opened a link or page; they did not type anything, pay, or install anything",
       entered_password: "They typed a password or login details into a page, or told someone their password",
       shared_code: "They gave someone a one-time code, verification code or PIN that was sent to them",
-      paid_card: "They paid with a debit or credit card",
+      paid_card: "They paid with a debit or credit card (not through a pay-later service)",
       paid_gift_card: "They bought gift cards and gave the numbers, or paid with gift cards",
       paid_crypto: "They sent cryptocurrency or put cash into a Bitcoin ATM",
       paid_bank_or_p2p: "They sent money by bank transfer, wire, Zelle, Venmo, Cash App, PayPal, or handed over cash",
       installed_app: "They installed an app or program, or let someone control their phone or computer",
       shared_ssn: "They gave their Social Security number",
+      paid_bnpl: "They paid through a buy-now-pay-later service such as Klarna, Afterpay, Affirm or Sezzle, or a payment link from one",
     },
   },
 };
 
+/** Same question when there is an active case: the call or message Bouncer just saw fills in what the words leave out. */
+export const LOSS_QUESTION_WITH_CASE: Record<string, JevQuestion> = {
+  loss_type: {
+    ...LOSS_QUESTION.loss_type,
+    instructions:
+      (LOSS_QUESTION.loss_type as { instructions: string }).instructions +
+      " If user_message doesn't say how, use recent_case (what Bouncer saw on the user's call or message a few minutes ago) to decide.",
+  } as JevQuestion,
+};
+
 export const MENU =
   "What happened? Reply 1 clicked a link, 2 typed a password, 3 shared a code, 4 paid by card, 5 gift card, " +
-  "6 crypto, 7 bank transfer or Zelle, 8 installed an app, 9 gave my SSN.";
+  "6 crypto, 7 bank transfer or Zelle, 8 installed an app, 9 gave my SSN, 10 Klarna, Afterpay or Affirm. " +
+  "If it was more than one, send them all, like 4, 9.";
+
+/** Asked once, before the last step: people often gave more than the first thing they mention. */
+export const ALSO_QUESTION =
+  "One more check: did you also share a password, a code or your Social Security number, or install anything they asked you to? Reply NO, or tell me which.";
+export const ALSO_WHICH = "Which one? Reply 2 password, 3 code, 8 installed an app, 9 SSN, or tell me in your own words.";
 
 export const DONE_PROMPT = "Reply DONE when you've done it, or NEXT to skip.";
 
@@ -114,6 +132,20 @@ export const CHECKLISTS: Record<LossType, Step[]> = {
     },
   ],
   clicked_only: [{ text: "Close that page now and don't type anything into it. Just clicking usually can't hurt you." }],
+  // {app} / {Service} / {service} are filled by checklist(): "the Klarna app" / "Klarna" when we know the
+  // service, generic words when we don't.
+  paid_bnpl: [
+    {
+      text:
+        "Open {app} yourself (not a link anyone sent you). Find that purchase, tap it, and report a problem or dispute it. " +
+        "Say it was a scam. This can pause the payments while they look into it.",
+    },
+    {
+      text:
+        "{Service} takes its payments from your card or bank. Call the number on that card or in your bank's app, " +
+        "say it was a scam, and ask them to watch for or block more {service} payments.",
+    },
+  ],
 };
 
 export const FINAL_STEP: Step = {
@@ -122,7 +154,20 @@ export const FINAL_STEP: Step = {
     "Then report it at ReportFraud.ftc.gov.",
 };
 
-export const stepsFor = (loss: LossType): Step[] => [...CHECKLISTS[loss], FINAL_STEP];
+/** The loss-specific steps, with the pay-later service filled in ("Klarna", or generic when unknown). */
+export function checklist(loss: LossType, service: string | null = null): Step[] {
+  const known = !!service && !/pay-later/i.test(service);
+  return CHECKLISTS[loss].map((s) => ({
+    ...s,
+    text: s.text
+      .replace("{app}", known ? `the ${service} app` : "the pay-later app you used (Klarna, Afterpay or Affirm)")
+      .replace("{Service}", known ? service! : "That service")
+      .replace("more {service} payments", known ? `more ${service} payments` : "more of those payments"),
+  }));
+}
+
+/** Steps for one loss followed by the final reporting step. */
+export const stepsFor = (loss: LossType, service: string | null = null): Step[] => [...checklist(loss, service), FINAL_STEP];
 
 /** Used when Gemini is slow or down (SPEC step 4 shape: 4 lines with blanks, no account numbers). */
 export const FALLBACK_SCRIPT: Record<"card" | "bank", string> = {

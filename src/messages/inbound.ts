@@ -6,7 +6,7 @@ import { voiceNumberForText, getOrCreateUser, saveConversation, setOptedIn, mark
 import { sendLines, setTyping, downloadAttachment } from "../photon/client.js";
 import { parseYesNo, resolvePending } from "../pending.js";
 import { handleFamilyText, startFamilyEmergency } from "../family/index.js";
-import { startRecovery, handleRecoveryText } from "../recovery/index.js";
+import { startRecovery, handleRecoveryText, recoveryAwaitsYesNo } from "../recovery/index.js";
 import { handleSetupText, startSetup, isSetupCommand } from "../family/setup.js";
 import { askJev, choice, noul, type JevQuestion } from "../detection/jev.js";
 import {
@@ -23,6 +23,7 @@ import { MESSAGE_QUESTIONS } from "../detection/questions.js";
 import { atLeast, LEVEL_LABEL } from "../detection/risk.js";
 import { writeVerdictReply, answerChat, pickFresh, topFlags, type ChatKind } from "../detection/reply.js";
 import { addUserTurn, addBouncerTurn, getHistory, setVerdict } from "./history.js";
+import { getCase, openCase, caseForModel, detectPayment, detectAmounts } from "./case.js";
 
 const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
 
@@ -110,6 +111,12 @@ const ASKS_ABOUT_MISSING_RE =
 const asksAboutMissing = (text: string) =>
   text.length <= 90 && !/https?:|www\.|\.[a-z]{2,4}\/|\d{4,}|["“]/i.test(text) && ASKS_ABOUT_MISSING_RE.test(text);
 const isFollowup = (text: string) => text.length <= 80 && !/https?:|www\.|\d{4,}/i.test(text) && FOLLOWUP_RE.test(text);
+/**
+ * A short reply ("klarna link", "what do I do now", "he said 1.5k") rather than a message to check: no link,
+ * email or long number. During an active case these are about the case and are never scanned as a new message.
+ */
+const isShortReply = (text: string) =>
+  text.length <= 80 && text.trim().split(/\s+/).length <= 10 && !/https?:|www\.|\.[a-z]{2,4}\/|@|\d{4,}/i.test(text);
 
 const OPT_IN = [
   `You're all set. Text me anything suspicious, or call me at ${CALL_NUMBER} (or merge me into a call that feels off) and I'll text you warnings.`,
@@ -148,7 +155,9 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
   if (msg.attachmentIds.length) return handleScreenshot(user, msg, say, t0);
 
   // 1. YES / NO for an action another flow parked (verify call, loss question, call feedback, …).
+  // Recovery asking "Is that right?" / "anything else?" goes first: that question is the newest one.
   const yn = parseYesNo(text);
+  if (yn && recoveryAwaitsYesNo(user.id) && (await handleRecoveryText(user, msg))) return;
   if (yn && (await resolvePending(user.id, yn))) return;
 
   // 1b. Flow 3 setup by text: an open setup conversation, "set up family", "JOIN ABC123", "change safe word".
@@ -213,6 +222,57 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
     return;
   }
 
+  // 3c. A short reply while a scam case is active (the call or message Bouncer just saw, case.ts): it is
+  // about that case, not a new message to judge. Jev routes it with the case (intent only, no scam
+  // questions, so scan calibration is untouched); chat answers it with the case in view.
+  const kase = getCase(user.id);
+  let caseLabel: string | null = null;
+  if (kase && isShortReply(text)) {
+    setTyping(msg.spaceId, msg.agentUserId, true);
+    try {
+      const r = await askJev({ user_message: text, recent_case: caseForModel(kase) }, INTENT, { retries: 1, timeoutMs: 4_000 });
+      caseLabel = choice(r, "intent").label;
+    } catch (err: any) {
+      console.warn(`[inbound] case routing failed (${err?.message}); answering as chat`);
+      caseLabel = "question";
+    } finally {
+      setTyping(msg.spaceId, msg.agentUserId, false);
+    }
+    console.log(`[inbound] user ${uid} case reply intent=${caseLabel ?? "?"} (case ${kase.source})`);
+  }
+  // A pasted message of 6+ words that Jev calls check_message still gets the full scan below; a few words
+  // ("klarna link") are an answer about the case.
+  const scanAnyway = caseLabel === "check_message" && text.trim().split(/\s+/).length >= 6;
+  if (caseLabel && !scanAnyway) {
+    switch (caseLabel) {
+      case "already_paid":
+        addUserTurn(user.id, text);
+        await startRecovery({ userId: user.id, text, source: "text" });
+        addBouncerTurn(user.id, "[Bouncer started the step-by-step recovery checklist by text]");
+        return;
+      case "family_emergency":
+        addUserTurn(user.id, text);
+        await startFamilyEmergency({ userId: user.id, content: text, source: "text" });
+        addBouncerTurn(user.id, "[Bouncer started the family-emergency steps by text: ask for the family safe word, offer to call the relative's own number]");
+        return;
+      case "setup":
+        addUserTurn(user.id, "[asked to set up family or a safe word]");
+        await startSetup(user, (lines) => say(lines, "setup"));
+        return;
+      default: {
+        setTyping(msg.spaceId, msg.agentUserId, true);
+        try {
+          const kind: ChatKind = history.verdict && isFollowup(text) ? "followup" : "question";
+          await chat(user, text, kind, say, Math.max(t0 + 4_500, Date.now() + 1_500), history);
+          console.log(`[inbound] user ${uid} chat kind=${kind} (case) in ${Date.now() - t0} ms`);
+        } finally {
+          setTyping(msg.spaceId, msg.agentUserId, false);
+        }
+        return;
+      }
+    }
+  }
+
   // 4. Route with Jev and score the message in the same request.
   setTyping(msg.spaceId, msg.agentUserId, true);
   try {
@@ -274,10 +334,18 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
 
 type Say = (lines: string[], tag?: string) => Promise<void>;
 
-/** One chat answer: sees the conversation before this text, then both sides are added to memory. */
+/** One chat answer: sees the conversation before this text (and the active case), then both sides are added to memory. */
 async function chat(user: User, text: string, kind: ChatKind, say: Say, deadline: number, history = getHistory(user.id)) {
   addUserTurn(user.id, text);
-  const answer = await answerChat(text, { turns: history.turns, verdict: history.verdict, kind, firstContact: !history.turns.length, deadline });
+  const answer = await answerChat(text, {
+    turns: history.turns,
+    summary: history.summary,
+    verdict: history.verdict,
+    case: getCase(user.id),
+    kind,
+    firstContact: !history.turns.length && !history.summary,
+    deadline,
+  });
   await say([answer], "chat");
 }
 
@@ -358,6 +426,17 @@ async function reply(
   if (atLeast(scan.risk.level, "likely_scam")) {
     lines[lines.length - 1] += " Reply REPORT to warn people near you.";
     rememberBody(user.id, body, scan.scamType);
+    // The key facts (never the text) become the active case, so "I already paid" etc. are understood.
+    openCase(user.id, {
+      source: msg.attachmentIds.length ? "screenshot" : "text",
+      level: scan.risk.level,
+      scamType: scan.scamType,
+      flags: scan.flags,
+      brand: claimedBrand,
+      payment: detectPayment(body),
+      amounts: detectAmounts(body),
+      durationS: null,
+    });
   }
   setVerdict(user.id, {
     level: scan.risk.level,
