@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:message": "tsx --env-file=.env scripts/test-message.ts",
     "test:call": "tsx --env-file=.env scripts/test-call.ts",
+    "test:postcall": "tsx --env-file=.env scripts/test-postcall.ts",
     "seed:family": "tsx --env-file=.env scripts/seed-family.ts",
     "eval": "tsx --env-file=.env scripts/eval.ts"
   },
