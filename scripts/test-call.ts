@@ -2,7 +2,7 @@
 //
 //   npm run test:call                    # spawns its own server on PORT (default 3102) with DRY_RUN=1, PHOTON_SOCKET=off
 //   npm run test:call -- --no-spawn      # use a server you already started on PORT (alert checks become INFO)
-//   npm run test:call -- a c             # run only some scenarios (a b c d e f g h i j)
+//   npm run test:call -- a c             # run only some scenarios (a b c d e f g h i j k l m)
 //
 // DATABASE_URL must point at a LOCAL database: the runner creates a throwaway user whose voice_phone is the
 // fake caller (so dry-run alerts print) and deletes it at the end. Remote DBs are refused.
@@ -17,9 +17,11 @@ const CALLER = "+12145550123"; // valid US format, fictional 555-01xx number
 const SECRET = process.env.BOUNCER_LLM_SECRET ?? "";
 const args = process.argv.slice(2);
 const noSpawn = args.includes("--no-spawn");
-const only = args.filter((a) => /^[a-j]$/.test(a));
+const only = args.filter((a) => /^[a-m]$/.test(a));
 const run = (k: string) => only.length === 0 || only.includes(k);
 const SETTLE_MS = 7000; // debounce (1.2 s) + Jev + Gemini brand + dry-run sends
+// Talk-mode idle timeout for the spawned server: shorter than the 28 s default so (m) runs quickly.
+const TALK_IDLE_MS = Number(process.env.CALL_TALK_IDLE_MS) || 10_000;
 
 const results: { ok: boolean | null; name: string; detail: string }[] = [];
 const check = (name: string, ok: boolean | null, detail = "") => {
@@ -47,7 +49,7 @@ async function startServer() {
   }
   if (await healthy()) throw new Error(`Something is already listening on ${BASE}. Stop it or pass --no-spawn.`);
   server = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
-    env: { ...process.env, PORT: String(PORT), DRY_RUN: "1", PHOTON_SOCKET: "off" },
+    env: { ...process.env, PORT: String(PORT), DRY_RUN: "1", PHOTON_SOCKET: "off", CALL_TALK_IDLE_MS: String(TALK_IDLE_MS) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const onData = (d: Buffer) =>
@@ -123,12 +125,15 @@ interface TurnResult {
   done: boolean;
 }
 
-/** Posts the whole history (system + all user turns), like ElevenLabs does on every turn. */
-async function turn(conv: string, userTurns: string[], caller = CALLER, abortAfterMs?: number): Promise<TurnResult> {
+/**
+ * Posts the whole history (system + all user turns), like ElevenLabs does on every turn. `replies[i]` is
+ * what the agent said after user turn i (ElevenLabs sends it as an assistant message; "" for skip_turn).
+ */
+async function turn(conv: string, userTurns: string[], caller = CALLER, abortAfterMs?: number, replies: string[] = []): Promise<TurnResult> {
   const messages: any[] = [{ role: "system", content: `conv=${conv} caller=${caller}` }];
   userTurns.forEach((t, i) => {
     messages.push({ role: "user", content: t });
-    if (i < userTurns.length - 1) messages.push({ role: "assistant", content: "" });
+    if (i < userTurns.length - 1) messages.push({ role: "assistant", content: replies[i] ?? "" });
   });
   const t0 = Date.now();
   const ac = new AbortController();
@@ -283,8 +288,9 @@ async function scenarioC() {
   check("(c) wake phrase gets a spoken reply", r.kind === "speak" && r.done, r.kind);
   check("(c) spoken reply streamed through to [DONE] in < 6 s", r.done && r.totalMs < 6000, `${r.totalMs} ms`);
   check("(c) first words in < 1.5 s (filler or Gemini)", (r.firstContentMs ?? 1e9) < 1500, `${r.firstContentMs} ms`);
-  const sentences = r.text.replace(/^One moment\.\.\.\s*/, "").split(/(?<=[.!?])\s+/).filter((x) => x.trim()).length;
-  check("(c) at most 2 sentences (filler aside)", sentences <= 2, `${sentences}`);
+  const sentences = sentenceCount(r.text);
+  // Was "at most 2": replies may now be 1–3 short sentences.
+  check("(c) at most 3 sentences (filler aside)", sentences <= 3, `${sentences}`);
   check("(c) mentions the known scam pattern", /known scam pattern/i.test(r.text));
 
   turns.push("Okay sir, hold on, let me go find my card.");
@@ -308,7 +314,9 @@ async function scenarioD() {
   turns.push("Thanks Bouncer.");
   const r2 = await turn(conv, turns);
   console.log(`    thanks: ${fmt(r2)}`);
-  check("(d) thanks → \"Okay, I'll keep listening quietly.\"", r2.text === "Okay, I'll keep listening quietly.", r2.text);
+  // Was an exact "Okay, I'll keep listening quietly."; the sign-off is now one of a few varied lines.
+  const { SIGN_OFFS } = await import("../src/voice/talk.js");
+  check("(d) thanks → a brief sign-off", r2.kind === "speak" && SIGN_OFFS.includes(r2.text), r2.text);
   turns.push("So anyway, like I was saying, we need you to buy gift cards.");
   const r3 = await turn(conv, turns);
   check("(d) after thanks, turns → skip_turn", r3.kind === "skip", r3.kind);
@@ -319,7 +327,7 @@ async function scenarioD() {
 }
 
 async function scenarioE() {
-  console.log("\n== (e) talk-mode follow-up meant for Bouncer (Jev addressed_to_bouncer; soft check) ==");
+  console.log("\n== (e) talk-mode follow-up meant for Bouncer ==");
   const conv = `tcE_${Date.now()}`;
   const turns = [SCAM[1], "Hey Bouncer, is this guy really from Chase?"];
   await turn(conv, turns.slice(0, 1));
@@ -328,7 +336,8 @@ async function scenarioE() {
   turns.push("So Bouncer, should I hang up on him right now?");
   const r2 = await turn(conv, turns);
   console.log(`    follow-up: ${fmt(r2)}`);
-  check("(e) follow-up addressed to Bouncer gets an answer", r2.kind === "speak" ? true : null, r2.kind);
+  // Was a soft (INFO) check on Jev's 0.6 gate; naming Bouncer now always counts as addressed.
+  check("(e) follow-up addressed to Bouncer gets an answer", r2.kind === "speak", r2.kind);
   const bad = await fetch(`${BASE}/v1/chat/completions`, { method: "POST", body: "{}", headers: { Authorization: "Bearer nope" } });
   check("(e) wrong bearer → 401", bad.status === 401, String(bad.status));
 }
@@ -481,9 +490,125 @@ async function scenarioJ() {
   check("(j) concrete ask but level below Likely → not texted", show(r) === "--", show(r));
 }
 
+// ---- talk-mode conversation helpers -------------------------------------------------------------
+let FILLER_LIST: string[] = [];
+const stripFiller = (t: string) => {
+  for (const f of FILLER_LIST) if (t.startsWith(f)) return t.slice(f.length);
+  return t;
+};
+const sentenceCount = (t: string) => stripFiller(t).split(/(?<=[.!?])\s+/).filter((x) => x.trim()).length;
+const norm = (t: string) => stripFiller(t).toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+/** A call where each turn carries the whole history, Bouncer's earlier replies included (like ElevenLabs). */
+function conversation(conv: string) {
+  const userTurns: string[] = [];
+  const replies: string[] = [];
+  const log: { said: string; r: TurnResult }[] = [];
+  return {
+    log,
+    async say(text: string, pauseMs = 800) {
+      userTurns.push(text);
+      const r = await turn(conv, userTurns, CALLER, undefined, replies);
+      replies[userTurns.length - 1] = r.kind === "speak" ? r.text : "";
+      log.push({ said: text, r });
+      await sleep(pauseMs); // the user listens to the reply, then talks
+      return r;
+    },
+    print() {
+      for (const { said, r } of log) {
+        console.log(`    USER     ${JSON.stringify(said)}`);
+        console.log(
+          r.kind === "speak"
+            ? `    BOUNCER  ${JSON.stringify(r.text)}  [first audio ${r.firstContentMs} ms, done ${r.totalMs} ms]`
+            : `    BOUNCER  (${r.kind === "skip" ? "silent: skip_turn" : r.kind}, ${r.totalMs} ms)`,
+        );
+      }
+    },
+  };
+}
+
+/** Spoken replies in order: no two in a row may be the same (filler aside). */
+function noRepeats(rs: TurnResult[]) {
+  const spoken = rs.filter((r) => r.kind === "speak").map((r) => norm(r.text));
+  return spoken.every((t, i) => i === 0 || t !== spoken[i - 1]);
+}
+
+const levelOf = (conv: string) => {
+  const ls = logSince(0, new RegExp(`conv=${conv.slice(0, 10)} scored .*level=(\\w+)`));
+  return ls.length ? ls[ls.length - 1].match(/level=(\w+)/)![1] : null;
+};
+
+async function scenarioK() {
+  console.log("\n== (k) natural conversation: silent before the wake phrase, then a real back-and-forth ==");
+  const c = conversation(`tcK_${Date.now()}`);
+  const pre = [await c.say("Hello?"), await c.say("Hello, is anyone there?")];
+  const talk = [];
+  for (const t of [
+    "Hey Bouncer, how are you?",
+    "What's up?",
+    "Can you tell me what you do?",
+    "Is this call safe?",
+    "Okay what should I watch out for on calls like this?",
+  ])
+    talk.push(await c.say(t));
+  const bye = await c.say("Thanks Bouncer");
+  const after = await c.say("Alright, I'm back. So what were you saying about the delivery?");
+  c.print();
+  check("(k) silent before the wake phrase", pre.every((r) => r.kind === "skip"), pre.map((r) => r.kind).join(","));
+  check("(k) no silence on direct follow-ups in talk mode", talk.every((r) => r.kind === "speak" && r.done), talk.map((r) => r.kind).join(","));
+  check("(k) no two identical consecutive replies", noRepeats([...talk, bye]));
+  check("(k) replies are 1–3 sentences", talk.every((r) => r.kind !== "speak" || sentenceCount(r.text) <= 3), talk.map((r) => sentenceCount(r.text)).join(","));
+  const firsts = [...talk, bye].filter((r) => r.kind === "speak").map((r) => r.firstContentMs ?? 1e9);
+  check("(k) < 2 s to first audio on every spoken turn", Math.max(...firsts) < 2000, `max ${Math.max(...firsts)} ms`);
+  check("(k) no 'known scam pattern' on a benign call", !talk.some((r) => /known scam pattern/i.test(r.text)));
+  const { SIGN_OFFS } = await import("../src/voice/talk.js");
+  check("(k) \"Thanks Bouncer\" → brief sign-off", bye.kind === "speak" && SIGN_OFFS.includes(bye.text), bye.text);
+  check("(k) silent after the sign-off", after.kind === "skip", after.kind);
+}
+
+async function scenarioL() {
+  console.log("\n== (l) scam call, then \"Hey Bouncer, why do you think this is a scam?\" ==");
+  const conv = `tcL_${Date.now()}`;
+  const c = conversation(conv);
+  for (const t of SCAM) await c.say(t, 1500);
+  await sleep(SETTLE_MS); // let Jev's level settle
+  const why = await c.say("Hey Bouncer, why do you think this is a scam?");
+  const next = await c.say("What should I say to him?");
+  const bye = await c.say("Bye Bouncer.");
+  const scammer = await c.say("Hello? Ma'am? Are you still there? I need that code right now.");
+  c.print();
+  const level = levelOf(conv);
+  check("(l) scam turns before the wake → all silent", c.log.slice(0, SCAM.length).every((x) => x.r.kind === "skip"));
+  check("(l) \"why do you think this is a scam?\" gets a spoken answer", why.kind === "speak" && why.done, why.kind);
+  if (level === "likely_scam" || level === "high_risk") {
+    check("(l) says it matches a known scam pattern (level is Likely+)", /known scam pattern/i.test(why.text), `level=${level}`);
+  } else check("(l) known scam pattern line", null, `level=${level}: Jev didn't reach Likely, so it must not be said`);
+  check("(l) names a red flag it heard", /code|pin|password|rush|urgent|pressur|secret|frozen|fraud department|pretend|claim|bank|chase/i.test(why.text), why.text);
+  check("(l) follow-up \"What should I say to him?\" answered", next.kind === "speak", next.kind);
+  check("(l) no two identical consecutive replies", noRepeats([why, next, bye]));
+  check("(l) \"Bye Bouncer\" → sign-off", bye.kind === "speak", bye.kind);
+  check("(l) scammer's next line after the sign-off → silent", scammer.kind === "skip", scammer.kind);
+  const firsts = [why, next, bye].filter((r) => r.kind === "speak").map((r) => r.firstContentMs ?? 1e9);
+  check("(l) < 2 s to first audio", Math.max(...firsts) < 2000, `max ${Math.max(...firsts)} ms`);
+}
+
+async function scenarioM() {
+  console.log(`\n== (m) talk mode idles out after ${TALK_IDLE_MS / 1000} s; "Bouncer, …" re-enters ==`);
+  if (!server) return check("(m) idle timeout", null, "needs a spawned server (CALL_TALK_IDLE_MS is set at spawn)");
+  const c = conversation(`tcM_${Date.now()}`);
+  const wake = await c.say("Hey Bouncer, are you there?", TALK_IDLE_MS + 1500);
+  const late = await c.say("Is this call safe?");
+  const back = await c.say("Bouncer, is this call safe?");
+  c.print();
+  check("(m) wake → spoken", wake.kind === "speak", wake.kind);
+  check("(m) direct question after the idle timeout → silent", late.kind === "skip", late.kind);
+  check("(m) \"Bouncer, …\" (name first) → talking again", back.kind === "speak", back.kind);
+}
+
 // ---- main -----------------------------------------------------------------------------------------
 async function main() {
   if (!SECRET) throw new Error("BOUNCER_LLM_SECRET is not set (npm run test:call loads .env)");
+  FILLER_LIST = (await import("../src/voice/talk.js")).FILLERS;
   await seedUser();
   await startServer();
   if (run("a")) await scenarioA();
@@ -496,6 +621,9 @@ async function main() {
   if (run("h")) await scenarioH();
   if (run("i")) await scenarioI();
   if (run("j")) await scenarioJ();
+  if (run("k")) await scenarioK();
+  if (run("l")) await scenarioL();
+  if (run("m")) await scenarioM();
   const failed = results.filter((r) => r.ok === false);
   console.log(`\n${results.filter((r) => r.ok).length} passed, ${failed.length} failed, ${results.filter((r) => r.ok === null).length} info`);
   failed.forEach((f) => console.log(`FAIL  ${f.name}  ${f.detail}`));

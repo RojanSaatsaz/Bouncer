@@ -35,11 +35,16 @@ export const CALL_QUESTIONS: Record<string, JevQuestion> = {
 /** Flags that can trigger a text during the call (names only are ever logged). */
 export const CALL_FLAGS = ["asks_code", "remote_access", "money_or_code", "impersonation", "urgency_secrecy", "family_danger"];
 
-/** Step 8: is a turn in talk mode still meant for Bouncer? (state = last 3 turns) */
+/**
+ * Step 8: is a turn in talk mode still meant for Bouncer? (state = the recent dialogue, Bouncer's own
+ * replies labelled). A tie-breaker only: talk.ts also treats direct questions and greetings as addressed.
+ */
 export const ADDRESSED_QUESTION: Record<string, JevQuestion> = {
   addressed_to_bouncer: {
     type: "noul",
-    instructions: "The latest turn speaks to the assistant called Bouncer, not to another person on the call.",
+    instructions:
+      "The latest turn continues the conversation with the assistant called Bouncer (it asks Bouncer something, " +
+      "answers or reacts to what Bouncer just said, greets or thanks it), rather than speaking to another person on the call.",
   },
 };
 

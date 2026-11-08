@@ -45,10 +45,22 @@ export interface CallSession {
   spoken: Map<number, { state: "streaming" | "done"; text: string; gen: number }>;
   /** Bumped for every spoken reply started this call. */
   speakGen: number;
-  /** Talk mode: user-turn index → in-flight/finished "is this addressed to Bouncer?" decision. */
-  addressed: Map<number, Promise<boolean>>;
+  /** Talk mode: user-turn index → in-flight/finished Jev addressed_to_bouncer probability for that text (null = failed). */
+  addressed: Map<number, { text: string; p: Promise<number | null>; missCounted?: boolean }>;
   /** Index of the last turn Bouncer answered out loud. */
   lastTalkTurn: number;
+  /**
+   * Talk mode memory (in memory only, dropped with the session): user-turn index → what Bouncer said
+   * in reply. Prompts Gemini with the real dialogue so Bouncer can hold a conversation without repeating.
+   */
+  replies: Map<number, string>;
+  /** Last time someone talked with Bouncer (answered turn or end of a spoken reply). Talk mode idles out from here. */
+  talkAt: number;
+  /** Talk mode: consecutive turns that didn't look meant for Bouncer (2 → back to listening). */
+  misses: number;
+  /** Last filler / sign-off line spoken, so the same one is never said twice in a row. */
+  lastFiller: string | null;
+  lastSignOff: string | null;
   /** Turn indexes spoken to Bouncer (wake, thanks, follow-ups): left out of what Jev scores. */
   botTurns: Set<number>;
   ended: boolean;
@@ -93,6 +105,11 @@ export function getOrCreateSession(conv: string): CallSession {
       addressed: new Map(),
       speakGen: 0,
       lastTalkTurn: -1,
+      replies: new Map(),
+      talkAt: 0,
+      misses: 0,
+      lastFiller: null,
+      lastSignOff: null,
       botTurns: new Set(),
       ended: false,
     };
@@ -112,6 +129,7 @@ export function endSession(conv: string): CallSession | null {
     s.ended = true;
     if (s.debounce) clearTimeout(s.debounce);
     s.debounce = null;
+    s.replies.clear();
     s.addressed.clear(); // background work checks `ended` and stops; the object is garbage once the webhook is done
   }
   return s;

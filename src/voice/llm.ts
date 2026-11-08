@@ -6,9 +6,10 @@ import { skipTurnResponse, parseSystemVars, messageText } from "./sse.js";
 import { handleVerifyTurn } from "../family/index.js";
 import { getOrCreateSession, isEnded, type CallSession } from "./session.js";
 import { identify, scheduleScore } from "./score.js";
-import { maybeTalk, WAKE, THANKS } from "./talk.js";
+import { maybeTalk, isWake, isSignOff } from "./talk.js";
 
 export async function handleChatCompletions(c: Context, body: any): Promise<Response> {
+  const t0 = Date.now();
   const messages: any[] = body?.messages ?? [];
   const vars = parseSystemVars(messages);
   if (vars.verify !== undefined) return handleVerifyTurn(c, body, vars);
@@ -34,16 +35,19 @@ export async function handleChatCompletions(c: Context, body: any): Promise<Resp
   const idx = userTexts.length - 1;
   if (idx < 0) return skipTurnResponse("bouncer-listen");
   const last = userTexts[idx];
-  if (WAKE.test(last) || THANKS.test(last)) s.botTurns.add(idx);
+  const wake = isWake(last);
+  const signOff = isSignOff(last);
+  if (wake || signOff) s.botTurns.add(idx);
   if (updateTurns(s, userTexts)) scheduleScore(s);
+  rememberSpokenReplies(s, messages);
 
   console.log(
-    `[listen] turn conv=${conv.slice(0, 10)} idx=${idx} mode=${s.mode} len=${last.length}${WAKE.test(last) ? " wake" : ""}${THANKS.test(last) ? " thanks" : ""}`,
+    `[listen] turn conv=${conv.slice(0, 10)} idx=${idx} mode=${s.mode} len=${last.length}${wake ? " wake" : ""}${signOff ? " sign-off" : ""}`,
   );
 
-  if (last && (s.mode === "talking" || WAKE.test(last) || THANKS.test(last))) {
+  if (last && (s.mode === "talking" || wake || signOff)) {
     try {
-      const res = await maybeTalk(s, idx, last);
+      const res = await maybeTalk(s, idx, last, t0);
       if (res) return res;
     } catch (err: any) {
       console.error(`[listen] talk failed: ${err?.message}`);
@@ -63,4 +67,22 @@ function updateTurns(s: CallSession, userTexts: string[]): boolean {
   });
   if (changed) s.version++;
   return changed;
+}
+
+/**
+ * ElevenLabs sends what the agent actually said as assistant messages (cut short if the user talked over
+ * it). Those replace our own record of Bouncer's replies, keyed by the user turn they answered, so the
+ * next prompt holds the real dialogue. In memory only (rule 1).
+ */
+function rememberSpokenReplies(s: CallSession, messages: any[]) {
+  const said = new Map<number, string>();
+  let idx = -1;
+  for (const m of messages) {
+    if (m?.role === "user") idx++;
+    else if (m?.role === "assistant" && idx >= 0) {
+      const t = messageText(m).trim();
+      if (t) said.set(idx, said.has(idx) ? `${said.get(idx)} ${t}` : t);
+    }
+  }
+  for (const [i, t] of said) s.replies.set(i, t);
 }

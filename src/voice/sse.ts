@@ -27,8 +27,13 @@ export function skipTurnResponse(model = "bouncer-listen"): Response {
 export interface SpeakOptions {
   model?: string;
   thenTool?: { name: string; arguments?: Record<string, unknown> };
-  firstChunkFallback?: string;
+  /** Filler said if the source has no text yet after `fallbackAfterMs`. A function is called only when the filler is actually needed. */
+  firstChunkFallback?: string | (() => string);
   fallbackAfterMs?: number;
+  /** When the turn arrived (default: now). The filler timer counts from here, so time spent deciding counts too. */
+  startedAt?: number;
+  /** Said if the source fails before producing any text. */
+  errorLine?: string;
   /** Called once when the response finishes or the client (ElevenLabs) cancels it. */
   onEnd?: (info: { cancelled: boolean; spoke: boolean }) => void;
 }
@@ -52,7 +57,7 @@ export function speakResponse(source: AsyncIterable<string> | string, opts: Spea
   let spoke = false; // anything sent, including the filler
   let gotContent = false; // real text from the source
   let ended = false;
-  const startedAt = Date.now();
+  const startedAt = opts.startedAt ?? Date.now();
 
   const finish = (cancelled: boolean) => {
     if (ended) return;
@@ -112,7 +117,8 @@ export function speakResponse(source: AsyncIterable<string> | string, opts: Spea
             }
             if (r === TIMEOUT) {
               // Source is slow: say the filler now, keep waiting on the same pending read next pull.
-              send(chunk(id, model, { content: opts.firstChunkFallback }));
+              const filler = typeof opts.firstChunkFallback === "function" ? opts.firstChunkFallback() : opts.firstChunkFallback;
+              send(chunk(id, model, { content: filler }));
               spoke = true;
               return;
             }
@@ -129,7 +135,7 @@ export function speakResponse(source: AsyncIterable<string> | string, opts: Spea
           } catch (err: any) {
             console.error("[sse] source failed:", err?.message);
             pending = null;
-            if (!gotContent) send(chunk(id, model, { content: "Sorry, I'll text you instead." }));
+            if (!gotContent) send(chunk(id, model, { content: opts.errorLine ?? "Sorry, I'll text you instead." }));
             spoke = true;
             phase = "tail";
             return;

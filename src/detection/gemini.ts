@@ -87,7 +87,7 @@ export async function generateJson<T>(a: GenerateArgs & { jsonSchema: Record<str
  */
 export async function* generateStream(a: GenerateArgs): AsyncGenerator<string> {
   let res: Response | null = null;
-  for (const tier of [a.tier, other(a.tier)]) {
+  for (const tier of a.noFallback ? [a.tier] : [a.tier, other(a.tier)]) {
     const model = modelFor(tier);
     try {
       const r = await fetch(`${BASE}${model}:streamGenerateContent?alt=sse`, {
