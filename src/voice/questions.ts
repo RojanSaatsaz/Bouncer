@@ -24,7 +24,9 @@ export const CALL_QUESTIONS: Record<string, JevQuestion> = {
   },
   family_danger: {
     type: "noul",
-    instructions: "Someone says a family member is hurt, arrested, kidnapped or in trouble.",
+    // Covers first-person voice-clone calls ("It's me, I'm in trouble"): 11 → 22 of 50 caught, no new legit triggers (docs/EVAL_CALLS.md).
+    instructions:
+      "Someone on the call says that they, or a member of the listener's family, have been hurt, arrested, in an accident, kidnapped or are in serious trouble.",
   },
   is_scam: { type: "noul", instructions: "This call is a scam." },
   scam_type: { type: "choice", instructions: "What kind of scam this call is, or would be.", criteria: SCAM_TYPES },

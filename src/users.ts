@@ -54,6 +54,11 @@ export async function markListenPending(userId: string) {
   await query("UPDATE users SET listen_pending_at = now() WHERE id = $1", [userId]);
 }
 
+/** Called once a call has been matched through the fallback, so the next unknown caller isn't attributed to them. */
+export async function clearListenPending(userId: string) {
+  await query("UPDATE users SET listen_pending_at = NULL WHERE id = $1", [userId]);
+}
+
 /** The user who texted "listen" in the last 2 minutes (Flow 2 step 3 fallback). */
 export const getListenPendingUser = () =>
   one<User>(

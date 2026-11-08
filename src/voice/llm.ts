@@ -4,7 +4,7 @@
 import type { Context } from "hono";
 import { skipTurnResponse, parseSystemVars, messageText } from "./sse.js";
 import { handleVerifyTurn } from "../family/index.js";
-import { getOrCreateSession, type CallSession } from "./session.js";
+import { getOrCreateSession, isEnded, type CallSession } from "./session.js";
 import { identify, scheduleScore } from "./score.js";
 import { maybeTalk, WAKE, THANKS } from "./talk.js";
 
@@ -16,6 +16,12 @@ export async function handleChatCompletions(c: Context, body: any): Promise<Resp
   const conv = vars.conv?.trim();
   if (!conv || conv.startsWith("{{")) {
     console.warn("[listen] turn without a conversation id; staying silent");
+    return skipTurnResponse("bouncer-listen");
+  }
+
+  // A late turn after the post-call webhook: answer silently and store nothing (rule 1).
+  if (isEnded(conv)) {
+    console.log(`[listen] late turn for ended call conv=${conv.slice(0, 10)}; skip_turn, nothing stored`);
     return skipTurnResponse("bouncer-listen");
   }
 

@@ -36,8 +36,15 @@ export interface CallSession {
   /** Highest level we texted an alert for. */
   alertedLevel: RiskLevel;
   familyStarted: boolean;
-  /** Talk mode: user-turn index → state of the spoken reply for that turn. */
-  spoken: Map<number, "streaming" | "done">;
+  /** Consecutive Jev scorings whose own level was likely_scam or higher (reset to 0 otherwise). */
+  likelyStreak: number;
+  /**
+   * Talk mode: user-turn index → the spoken reply for that turn: its state, the turn text it answered,
+   * and a generation number (a revised turn text supersedes the old reply; stale onEnd calls are ignored).
+   */
+  spoken: Map<number, { state: "streaming" | "done"; text: string; gen: number }>;
+  /** Bumped for every spoken reply started this call. */
+  speakGen: number;
   /** Talk mode: user-turn index → in-flight/finished "is this addressed to Bouncer?" decision. */
   addressed: Map<number, Promise<boolean>>;
   /** Index of the last turn Bouncer answered out loud. */
@@ -48,6 +55,15 @@ export interface CallSession {
 }
 
 const sessions = new Map<string, CallSession>();
+
+/**
+ * Conversation ids whose call already ended → when. A turn that arrives after the post-call webhook
+ * must not recreate a session (it would hold transcript until the 45-min sweep). Ids only, no content.
+ */
+const ENDED_KEEP_MS = 10 * 60_000;
+const endedConvs = new Map<string, number>();
+
+export const isEnded = (conv: string) => endedConvs.has(conv);
 
 export function getOrCreateSession(conv: string): CallSession {
   let s = sessions.get(conv);
@@ -72,8 +88,10 @@ export function getOrCreateSession(conv: string): CallSession {
       probs: {},
       alertedLevel: "safe",
       familyStarted: false,
+      likelyStreak: 0,
       spoken: new Map(),
       addressed: new Map(),
+      speakGen: 0,
       lastTalkTurn: -1,
       botTurns: new Set(),
       ended: false,
@@ -89,6 +107,7 @@ export const peekSession = (conv: string) => sessions.get(conv) ?? null;
 export function endSession(conv: string): CallSession | null {
   const s = sessions.get(conv) ?? null;
   sessions.delete(conv);
+  endedConvs.set(conv, Date.now());
   if (s) {
     s.ended = true;
     if (s.debounce) clearTimeout(s.debounce);
@@ -102,4 +121,6 @@ export function endSession(conv: string): CallSession | null {
 setInterval(() => {
   const cutoff = Date.now() - 45 * 60_000;
   for (const [k, s] of sessions) if (s.startedAt < cutoff) endSession(k);
+  const endedCutoff = Date.now() - ENDED_KEEP_MS;
+  for (const [k, at] of endedConvs) if (at < endedCutoff) endedConvs.delete(k);
 }, 5 * 60_000).unref();

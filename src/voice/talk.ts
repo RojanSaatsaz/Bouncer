@@ -6,6 +6,8 @@ import { generateStream } from "../detection/gemini.js";
 import { LEVEL_LABEL } from "../detection/risk.js";
 import { FLAG_LABELS } from "../detection/questions.js";
 import { startFamilyEmergency } from "../family/index.js";
+import { getCircleForProtected, getSafeWordRow } from "../family/circle.js";
+import { decryptWord, editDistance, normalizeWord, type EncryptedWord } from "../family/crypto.js";
 import { ADDRESSED_QUESTION, ACTION_QUESTION } from "./questions.js";
 import { scoreNow } from "./score.js";
 import { speakResponse, skipTurnResponse } from "./sse.js";
@@ -39,17 +41,19 @@ export async function maybeTalk(s: CallSession, idx: number, text: string): Prom
     // Only meaningful in talk mode (or a duplicate request for the thanks turn we already handled).
     if (s.mode !== "talking" && s.lastTalkTurn !== idx) return null;
     s.mode = "listening";
-    if (!claimTurn(s, idx)) return skipTurnResponse();
+    const gen = claimTurn(s, idx, text);
+    if (gen === null) return skipTurnResponse();
     console.log(`[listen] conv=${short(s.conv)} turn=${idx} thanks → listening`);
-    return speak(s, idx, "Okay, I'll keep listening quietly.");
+    return speak(s, idx, gen, "Okay, I'll keep listening quietly.");
   }
 
   if (WAKE.test(text)) {
     s.mode = "talking";
-    if (!claimTurn(s, idx)) return skipTurnResponse();
+    const gen = claimTurn(s, idx, text);
+    if (gen === null) return skipTurnResponse();
     console.log(`[listen] conv=${short(s.conv)} turn=${idx} wake phrase → talking`);
     void checkAction(s, idx);
-    return speak(s, idx, reply(s, idx));
+    return speak(s, idx, gen, reply(s, idx));
   }
 
   // Talk mode, a newer turn than the one we answered: is it still for Bouncer? (step 8)
@@ -68,37 +72,45 @@ export async function maybeTalk(s: CallSession, idx: number, text: string): Prom
       return null;
     }
     s.botTurns.add(idx);
-    if (!claimTurn(s, idx)) return skipTurnResponse();
+    const gen = claimTurn(s, idx, text);
+    if (gen === null) return skipTurnResponse();
     console.log(`[listen] conv=${short(s.conv)} turn=${idx} follow-up for Bouncer → answering`);
     void checkAction(s, idx);
-    return speak(s, idx, reply(s, idx));
+    return speak(s, idx, gen, reply(s, idx));
   }
   return null;
 }
 
 /**
- * One spoken reply per user-turn index. Duplicate (speculative) requests for a turn we're already
- * answering, or have answered, get skip_turn. If ElevenLabs cancelled our earlier reply mid-stream,
- * the claim is released and the next request for that turn may answer again.
+ * One spoken reply per user-turn index and text. A duplicate (speculative) request with the SAME text as
+ * the reply we're streaming or finished gets skip_turn. A request with DIFFERENT text is ElevenLabs revising
+ * the turn: it will play the newer response and cancel the older one, so the newer request supersedes the
+ * claim (new generation). If ElevenLabs cancelled our reply mid-stream, the claim is released and the next
+ * request for that turn may answer again. Returns the claim's generation, or null to stay silent.
  */
-function claimTurn(s: CallSession, idx: number): boolean {
-  if (s.spoken.has(idx)) return false;
-  s.spoken.set(idx, "streaming");
+function claimTurn(s: CallSession, idx: number, text: string): number | null {
+  const cur = s.spoken.get(idx);
+  if (cur && cur.text === text) return null;
+  const gen = ++s.speakGen;
+  if (cur) console.log(`[listen] conv=${short(s.conv)} turn=${idx} revised text → answering the newer request`);
+  s.spoken.set(idx, { state: "streaming", text, gen });
   s.lastTalkTurn = Math.max(s.lastTalkTurn, idx);
-  return true;
+  return gen;
 }
 
-function speak(s: CallSession, idx: number, source: AsyncIterable<string> | string): Response {
+function speak(s: CallSession, idx: number, gen: number, source: AsyncIterable<string> | string): Response {
   return speakResponse(source, {
     model: "bouncer-listen",
     firstChunkFallback: typeof source === "string" ? undefined : "One moment... ",
     fallbackAfterMs: 700,
     onEnd: ({ cancelled }) => {
+      const cur = s.spoken.get(idx);
+      if (cur?.gen !== gen) return; // superseded by a revised request: that one owns the turn now
       if (cancelled) {
         s.spoken.delete(idx);
         console.log(`[listen] conv=${short(s.conv)} turn=${idx} reply cancelled by client; turn may be answered again`);
       } else {
-        s.spoken.set(idx, "done");
+        cur.state = "done";
       }
     },
   });
@@ -108,25 +120,146 @@ function speak(s: CallSession, idx: number, source: AsyncIterable<string> | stri
 async function* reply(s: CallSession, idx: number): AsyncGenerator<string> {
   // Jev's level must be current before Gemini words anything (the debounce may still be pending).
   // Runs inside the stream, so the 700 ms "One moment..." filler covers the wait.
-  await scoreNow(s, 1500);
-  const turns = s.turns.slice(Math.max(0, idx - 19), idx + 1).filter((t) => t?.trim());
+  // Rule 2: the circle's safe word never reaches Gemini or the speaker. If it can't be loaded, this
+  // throws and the caller hears "Sorry, I'll text you instead." (fail closed).
+  const [, ref] = await Promise.all([scoreNow(s, 1500), safeWordRef(s)]);
+  const secret = ref ? decryptWord(ref.enc, ref.circleId) : null;
+  const turns = s.turns
+    .slice(Math.max(0, idx - 19), idx + 1)
+    .filter((t) => t?.trim())
+    .map((t) => redactSafeWord(t, secret));
   const flags = [...s.flags].map((f) => FLAG_LABELS[f] ?? f);
   const prompt =
     `Call transcript so far (oldest first, speakers are not labeled):\n${turns.join("\n")}\n\n` +
     `Risk level so far: ${LEVEL_LABEL[s.level]}.\n` +
-    `Red flags heard: ${flags.length ? flags.join("; ") : "none yet"}.\n\n` +
+    `Red flags heard: ${flags.length ? flags.join("; ") : "none yet"}.\n` +
+    `"${FAMILY_WORD}" marks a private word that was removed; never guess or repeat it.\n\n` +
     `The listener just spoke to you in the last line. Answer them.`;
-  for await (const piece of generateStream({
+  const pieces = generateStream({
     tier: "fast",
     system: SYSTEM,
     parts: [{ text: prompt }],
     temperature: 0.3,
     maxOutputTokens: 120,
     timeoutMs: 8000,
-  })) {
+  });
+  for await (const piece of withoutSafeWord(pieces, secret)) {
     const clean = piece.replace(/[*_#`]/g, "");
     if (clean) yield clean;
   }
+}
+
+// ---- Safe word redaction (rule 2) ---------------------------------------------------------------
+
+type WordRef = { enc: EncryptedWord; circleId: string } | null;
+/** Per call: the encrypted safe word of the caller's circle (never the plain word; decrypt into a local). */
+const wordRefs = new WeakMap<CallSession, Promise<WordRef>>();
+
+function safeWordRef(s: CallSession): Promise<WordRef> {
+  let p = wordRefs.get(s);
+  if (!p) {
+    p = (async () => {
+      await s.identifying;
+      if (s.userId === null) throw new Error("caller not identified yet");
+      if (s.userId === "unknown") return null;
+      const circle = await getCircleForProtected(s.userId);
+      const enc = circle ? await getSafeWordRow(circle.id) : null;
+      return enc && circle ? { enc, circleId: circle.id } : null;
+    })();
+    p.catch(() => wordRefs.delete(s)); // retry on the next spoken reply
+    wordRefs.set(s, p);
+  }
+  return p;
+}
+
+export const FAMILY_WORD = "[family word]";
+const TOKEN = /[\p{L}\p{N}\p{M}'’`]+/gu;
+// Same tolerance as Flow 3's wordsMatch: one letter per word (3+ letters), exact for shorter words.
+const slack = (w: string) => (w.length >= 3 ? 1 : 0);
+
+function tokenize(text: string) {
+  const out: { start: number; end: number; norm: string }[] = [];
+  for (const m of text.matchAll(TOKEN)) {
+    const norm = normalizeWord(m[0]).replace(/ /g, "");
+    if (norm) out.push({ start: m.index!, end: m.index! + m[0].length, norm });
+  }
+  return out;
+}
+
+/**
+ * Replaces every occurrence of the safe word in `text` with "[family word]". Matching follows Flow 3
+ * (normalised, each word within one letter, or the word run together / split). Over-redacting is fine.
+ */
+export function redactSafeWord(text: string, secret: string | null | undefined): string {
+  return replaceSafeWord(text, secret, FAMILY_WORD);
+}
+
+function replaceSafeWord(text: string, secret: string | null | undefined, replacement: string): string {
+  const want = secret ? normalizeWord(secret).split(" ").filter(Boolean) : [];
+  const n = want.length;
+  if (!n || !text) return text;
+  const joined = want.join("");
+  const budget = slack(joined);
+  const toks = tokenize(text);
+  const spans: [number, number][] = [];
+  for (let i = 0; i < toks.length; ) {
+    let hit = 0;
+    for (const size of [n + 1, n, n - 1]) {
+      if (size < 1 || i + size > toks.length) continue;
+      const win = toks.slice(i, i + size);
+      const ok =
+        size === n
+          ? want.every((w, k) => editDistance(win[k].norm, w, slack(w)) <= slack(w))
+          : editDistance(win.map((t) => t.norm).join(""), joined, budget) <= budget;
+      if (ok) {
+        hit = size;
+        break;
+      }
+    }
+    if (hit) {
+      spans.push([toks[i].start, toks[i + hit - 1].end]);
+      i += hit;
+    } else i++;
+  }
+  if (!spans.length) return text;
+  let out = "";
+  let at = 0;
+  for (const [a, b] of spans) {
+    out += text.slice(at, a) + replacement;
+    at = b;
+  }
+  return out + text.slice(at);
+}
+
+/**
+ * Filters a stream of spoken text so the safe word is never said, even split across chunks. The last
+ * (words in the safe word + 1) words are held back until they can no longer start a match; any match in
+ * the held text is dropped. Words released earlier can't be part of a later match (a match spans at most
+ * that many words), so nothing already spoken needs taking back.
+ */
+export async function* withoutSafeWord(source: AsyncIterable<string>, secret: string | null | undefined): AsyncGenerator<string> {
+  const words = secret ? normalizeWord(secret).split(" ").filter(Boolean).length : 0;
+  if (!words) {
+    yield* source;
+    return;
+  }
+  const hold = words + 1;
+  let buf = "";
+  for await (const piece of source) {
+    buf += piece;
+    // Only match whole words: a word still being streamed ("elephan…") is checked once it's complete.
+    const m = /\s(?=\S*$)/.exec(buf);
+    if (!m) continue;
+    buf = replaceSafeWord(buf.slice(0, m.index + 1), secret, "") + buf.slice(m.index + 1);
+    const toks = tokenize(buf);
+    if (toks.length <= hold) continue;
+    const cut = toks[toks.length - hold].start;
+    const ready = buf.slice(0, cut);
+    buf = buf.slice(cut);
+    if (ready) yield ready;
+  }
+  const last = replaceSafeWord(buf, secret, "");
+  if (last) yield last;
 }
 
 /** Jev state for step 8: the last 3 turns, with the latest one called out. */

@@ -4,7 +4,7 @@ import { askJev, noul, choice } from "../detection/jev.js";
 import { generateJson } from "../detection/gemini.js";
 import { riskLevel, atLeast, LEVEL_ORDER, type RiskLevel } from "../detection/risk.js";
 import { startFamilyEmergency } from "../family/index.js";
-import { toE164, getUserByVoicePhone, getListenPendingUser, textUser } from "../users.js";
+import { toE164, getUserByVoicePhone, getListenPendingUser, clearListenPending, textUser } from "../users.js";
 import { CALL_QUESTIONS, CALL_FLAGS } from "./questions.js";
 import type { CallSession } from "./session.js";
 
@@ -25,6 +25,8 @@ export function identify(s: CallSession, caller: string | undefined): Promise<vo
       if (!user) {
         user = await getListenPendingUser();
         how = "listen_pending";
+        // One "listen" text covers one call: clear it so the next unknown caller isn't attributed to this user.
+        if (user) await clearListenPending(user.id).catch((err) => console.error(`[listen] clearing listen_pending failed: ${err?.message}`));
       }
       s.userId = user?.id ?? "unknown";
       console.log(
@@ -104,6 +106,8 @@ async function scoreOnce(s: CallSession) {
     }
     const crossed = CALL_FLAGS.filter((f) => probs[f] >= FLAG_ALERT);
     for (const f of crossed) s.flags.add(f);
+    s.likelyStreak = nextStreak(s.likelyStreak, risk.level);
+    const streak = s.likelyStreak;
     console.log(
       `[listen] conv=${short(s.conv)} scored turns=${s.turns.length} level=${risk.level} p=${risk.p.toFixed(2)} flags=[${crossed.join(",")}] jev=${r.ms}ms`,
     );
@@ -111,7 +115,7 @@ async function scoreOnce(s: CallSession) {
     // Alerts (brand lookup + texts) run after the level is set, so a waiting spoken reply isn't held
     // up by them. Chained per session so two runs never interleave their sends.
     const prev = alertChain.get(s) ?? Promise.resolve();
-    alertChain.set(s, prev.then(() => alert(s, transcript)).catch((err) => console.error(`[listen] alerts failed: ${err?.message}`)));
+    alertChain.set(s, prev.then(() => alert(s, transcript, streak)).catch((err) => console.error(`[listen] alerts failed: ${err?.message}`)));
   } catch (err: any) {
     console.error(`[listen] conv=${short(s.conv)} scoring failed: ${err?.message}`);
   } finally {
@@ -138,18 +142,34 @@ export function callerTranscript(s: CallSession): string {
 }
 const WAKE_ANY = /\b(hey|hi|ok(ay)?|thanks?|thank you)[,.!]?\s+(bouncer|bouncers|bounce her)\b/i;
 
-/** A text alert needs someone on the call to actually ask for something (impersonation + urgency alone isn't enough). */
+/** Flags that mean someone on the call actually asked for something (impersonation + urgency alone isn't). */
 const CONCRETE_ASKS = ["asks_code", "remote_access", "money_or_code"];
+/** Consecutive Likely+ scorings that open the text gate without a concrete ask (docs/EVAL_CALLS.md). */
+export const LIKELY_STREAK_MIN = 2;
+
+/** Streak after one scoring: +1 when that scoring's own level is likely_scam or higher, else back to 0. */
+export const nextStreak = (prev: number, level: RiskLevel) => (atLeast(level, "likely_scam") ? prev + 1 : 0);
+
+/**
+ * Flag / level texts need the call's level at likely_scam or higher AND either a concrete ask flag or
+ * LIKELY_STREAK_MIN consecutive Likely+ scorings. One spiky scoring with no ask stays quiet (the live
+ * teammates false alarm, 2026-11-08); government threats and similar calls without a clear ask still alert.
+ */
+export function textGateOpen(s: { level: RiskLevel; flags: Set<string> }, streak: number): boolean {
+  if (!atLeast(s.level, "likely_scam")) return false;
+  return CONCRETE_ASKS.some((f) => s.flags.has(f)) || streak >= LIKELY_STREAK_MIN;
+}
 
 /** Alert lines (SPEC step 6), in priority order. Each flag is texted at most once per call. */
 const FLAG_LINES: Record<string, (brand: string | null) => string> = {
   asks_code: () => "⚠️ High risk: hang up. Never read a code to someone who called you.",
   remote_access: () => "⚠️ High risk: don't install anything. Hang up.",
   money_or_code: () => "⚠️ Likely scam: hang up. Real companies never ask for gift cards or crypto.",
+  // Not "Real {brand} never calls you": charities, insurers and doctors do call.
   impersonation: (brand) =>
     brand
-      ? `⚠️ Likely scam: hang up. Real ${brand} never calls you.`
-      : "⚠️ Likely scam: hang up. The real company never calls you like this. Call the number on their website or your card.",
+      ? `⚠️ Likely scam: hang up. If you think it's really ${brand}, call them back on a number you trust.`
+      : "⚠️ Likely scam: hang up. If you think it's really them, call back on the number on their website or your card.",
 };
 
 const LEVEL_LINES: Partial<Record<RiskLevel, string>> = {
@@ -157,7 +177,7 @@ const LEVEL_LINES: Partial<Record<RiskLevel, string>> = {
   high_risk: "⚠️ High risk: hang up now. This call matches a known scam pattern.",
 };
 
-async function alert(s: CallSession, transcript: string) {
+async function alert(s: CallSession, transcript: string, streak: number) {
   const userId = s.userId;
   if (!userId || userId === "unknown") return; // still transcribed and scored, but no one to text
 
@@ -171,9 +191,8 @@ async function alert(s: CallSession, transcript: string) {
   // Flag alerts say "Likely scam" / "High risk", so they wait until the call's level is at least
   // likely_scam (impersonation alone fires on many legit calls, see docs/HANDOFF.md). A flag that
   // crossed earlier is texted as soon as the level gets there.
-  if (!atLeast(s.level, "likely_scam")) return;
   // Live false alarm (2026-11-08): two teammates chatting reached likely_scam with no ask at all.
-  if (!CONCRETE_ASKS.some((f) => s.flags.has(f))) return;
+  if (!textGateOpen(s, streak)) return;
 
   const send = async (key: string, line: string) => {
     try {
