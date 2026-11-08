@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scam Shield Console</title>
+<meta name="description" content="Concept mock-up: a carrier-side Bouncer console that screens incoming messages in-network, pulls high-risk fraud to the top, tracks viral scam patterns, and warns users before they have to ask. All data is simulated.">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-2: #f3f2ee;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --brand: #e20074;
+    --brand-wash: rgba(226, 0, 116, 0.08);
+    --s1: #2a78d6;
+    --s2: #eb6834;
+    --s3: #1baf7a;
+    --bar: #2a78d6;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --good-text: #006300;
+    --crit-wash: rgba(208, 59, 59, 0.07);
+    --bubble-in: #e9e9eb;
+    --bubble-ink: #0b0b0b;
+    --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 4px 16px rgba(11, 11, 11, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --surface-2: #232321;
+      --ink: #f0efec;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --brand: #ff3d9e;
+      --brand-wash: rgba(255, 61, 158, 0.12);
+      --s1: #3987e5;
+      --s2: #d95926;
+      --s3: #199e70;
+      --bar: #3987e5;
+      --good-text: #0ca30c;
+      --crit-wash: rgba(208, 59, 59, 0.09);
+      --bubble-in: #2c2c2e;
+      --bubble-ink: #f0efec;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --brand: #ff3d9e;
+    --brand-wash: rgba(255, 61, 158, 0.12);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --bar: #3987e5;
+    --good-text: #0ca30c;
+    --crit-wash: rgba(208, 59, 59, 0.09);
+    --bubble-in: #2c2c2e;
+    --bubble-ink: #f0efec;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, select { font: inherit; color: inherit; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 0 16px 48px; }
+
+  /* ---------- concept banner + header ---------- */
+  .concept {
+    background: var(--brand-wash);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    text-align: center;
+    padding: 7px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .concept b { color: var(--ink); }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 18px 0 14px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand .mark {
+    width: 34px; height: 34px; border-radius: 8px; background: var(--brand);
+    display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 15px; letter-spacing: -0.5px;
+    flex: none;
+  }
+  .brand h1 { font-size: 18px; margin: 0; letter-spacing: -0.2px; }
+  .brand .sub { color: var(--muted); font-size: 12.5px; }
+  .brand .carrier { color: var(--brand); font-weight: 700; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+  .seg button { border: 0; background: transparent; padding: 5px 11px; border-radius: 7px; cursor: pointer; color: var(--ink-2); }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
+  select, .btn {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 9px; padding: 6px 11px; cursor: pointer;
+  }
+  .btn:hover, select:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--brand); border-color: transparent; color: #fff; font-weight: 600; }
+  .btn.primary:hover { filter: brightness(0.94); }
+  .btn.small { padding: 3px 9px; font-size: 12.5px; border-radius: 7px; }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; box-shadow: 0 0 0 0 rgba(12,163,12,.5); animation: pulse 2s infinite; }
+  .paused .live-dot { animation: none; background: var(--muted); }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12,163,12,.45); } 70% { box-shadow: 0 0 0 7px rgba(12,163,12,0); } 100% { box-shadow: 0 0 0 0 rgba(12,163,12,0); } }
+
+  /* ---------- cards + grid ---------- */
+  .grid { display: grid; gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+    padding: 16px; min-width: 0;
+  }
+  .card h2 { font-size: 15px; margin: 0; letter-spacing: -0.1px; }
+  .card .hint { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .section-title { display: flex; align-items: baseline; gap: 4px 10px; margin: 28px 0 10px; flex-wrap: wrap; }
+  .section-title h2 { font-size: 17px; margin: 0; }
+  .section-title .tag { font-size: 11.5px; color: var(--brand); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+  .section-title p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  /* ---------- stat tiles ---------- */
+  .tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tile { display: flex; flex-direction: column; gap: 4px; }
+  .tile .label { color: var(--ink-2); font-size: 12.5px; }
+  .tile .value { font-size: 24px; font-weight: 650; letter-spacing: -0.4px; }
+  .tile .delta { font-size: 12.5px; color: var(--ink-2); }
+  .tile .delta .up-good { color: var(--good-text); font-weight: 600; }
+  .tile.hero { grid-column: span 2; }
+  .tile.hero .value { font-size: 52px; line-height: 1.05; letter-spacing: -1.4px; }
+  .tile .spark { margin-top: auto; height: 28px; }
+
+  /* ---------- status badges (icon + label, never color alone) ---------- */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+    font-size: 12px; font-weight: 600; padding: 2px 8px 2px 6px; border-radius: 999px;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--border);
+  }
+  .badge i { width: 14px; height: 14px; border-radius: 50%; display: inline-grid; place-items: center; font-style: normal; font-size: 9px; color: #fff; font-weight: 800; }
+  .badge.high i { background: var(--critical); }
+  .badge.likely i { background: var(--serious); }
+  .badge.unsure i { background: var(--warning); color: #0b0b0b; }
+  .badge.safe i { background: var(--good); }
+  .chip { display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border); white-space: nowrap; }
+  .ph { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--brand); background: var(--brand-wash); border-radius: 4px; padding: 0 4px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .ok { color: var(--good-text); font-weight: 600; }
+
+  /* ---------- tables ---------- */
+  .table-wrap { overflow-x: auto; margin: 0 -4px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; }
+  td.nowrap, span.nowrap { white-space: nowrap; }
+  .queue tbody tr { background: var(--crit-wash); box-shadow: inset 3px 0 0 var(--critical); cursor: pointer; }
+  .queue tbody tr:hover td { background: rgba(208, 59, 59, 0.05); }
+  .queue tbody tr.fresh { animation: arrive 1.6s ease-out; }
+  @keyframes arrive { 0% { background: rgba(226, 0, 116, 0.22); } 100% { background: var(--crit-wash); } }
+  .flags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+  /* ---------- live feed ---------- */
+  .feed { list-style: none; margin: 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 52px 108px minmax(0, 1fr); gap: 10px; align-items: start; padding: 9px 4px; border-bottom: 1px solid var(--grid); }
+  .feed li.new { animation: slide .45s ease-out; }
+  @keyframes slide { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  .feed .t { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .feed .msg { min-width: 0; }
+  .feed .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .feed .body { color: var(--ink-2); overflow-wrap: anywhere; }
+  .feed .hidden-body { color: var(--muted); font-style: italic; }
+  .pulled { color: var(--brand); font-weight: 600; font-size: 12px; }
+
+  /* ---------- patterns ---------- */
+  .patterns { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+  .plist { display: flex; flex-direction: column; gap: 10px; }
+  .pcard { border: 1px solid var(--border); border-radius: 12px; padding: 12px; cursor: pointer; background: var(--surface); text-align: left; width: 100%; }
+  .pcard:hover { background: var(--surface-2); }
+  .pcard[aria-pressed="true"] { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
+  .pcard .row1 { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .pcard .name { font-weight: 650; display: flex; align-items: center; gap: 8px; }
+  .key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: none; }
+  .pcard .tpl { margin: 6px 0 8px; color: var(--ink-2); font-size: 13px; }
+  .pcard .stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+  .pcard .stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .trend { font-size: 12px; font-weight: 650; display: inline-flex; align-items: center; gap: 4px; }
+  .trend i { font-style: normal; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin: 0 0 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .chart { position: relative; width: 100%; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    padding: 7px 9px; font-size: 12.5px; box-shadow: 0 6px 22px rgba(0,0,0,.14); white-space: nowrap; z-index: 5; display: none;
+  }
+  .tooltip .tt-title { font-weight: 650; margin-bottom: 3px; }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .tooltip .tt-row b { margin-left: auto; padding-left: 12px; }
+  .view-toggle { margin-left: auto; }
+  .chart-table { display: none; }
+  .show-table .chart-table { display: block; }
+  .show-table .chart, .show-table .legend { display: none; }
+
+  /* ---------- proactive warnings + auto alerts ---------- */
+  .two { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+  .phone {
+    width: 100%; max-width: 300px; margin: 0 auto; border-radius: 30px; border: 1px solid var(--border);
+    background: var(--surface-2); padding: 14px 12px 18px;
+  }
+  .phone .bar { text-align: center; font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
+  .phone .who { text-align: center; font-size: 12.5px; font-weight: 600; margin-bottom: 12px; }
+  .phone .who small { display: block; color: var(--muted); font-weight: 400; }
+  .bubble { background: var(--bubble-in); color: var(--bubble-ink); border-radius: 18px 18px 18px 6px; padding: 9px 12px; font-size: 13.5px; line-height: 1.4; margin: 0 24px 6px 0; }
+  .bubble + .bubble { border-radius: 6px 18px 18px 6px; }
+  .bubble a { color: var(--s1); text-decoration: none; }
+  .stamp { font-size: 11px; color: var(--muted); margin: 2px 0 10px 4px; }
+  .composer { display: grid; gap: 10px; }
+  .field { display: grid; gap: 4px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field .val { border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; background: var(--surface); }
+  .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .step { border: 1px solid var(--border); border-radius: 12px; padding: 11px; position: relative; background: var(--surface); }
+  .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; margin-bottom: 6px; }
+  .step b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .step span { color: var(--ink-2); font-size: 12.5px; }
+  .step:not(:last-child)::after { content: "→"; position: absolute; right: -9px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; background: var(--page); line-height: 1; }
+  .timing { color: var(--muted); font-size: 11.5px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+  footer { margin-top: 28px; color: var(--muted); font-size: 12.5px; display: grid; gap: 6px; }
+  footer b { color: var(--ink-2); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: var(--ink); color: var(--page); padding: 9px 14px; border-radius: 10px; font-size: 13px; transition: .25s; z-index: 50; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 1100px) {
+    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .patterns, .two, .main { grid-template-columns: minmax(0, 1fr) !important; }
+  }
+  @media (max-width: 640px) {
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tile.hero { grid-column: span 2; }
+    .tile.hero .value { font-size: 48px; }
+    .flow { grid-template-columns: minmax(0, 1fr); }
+    .step:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -11px; transform: translateX(-50%); }
+    .feed li { grid-template-columns: 44px minmax(0, 1fr); }
+    .feed li .lvl { grid-column: 2; }
+    .feed li .msg { grid-column: 2; }
+    .brand h1 { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="concept"><b>Concept mock-up.</b> What Bouncer could do with carrier-level message access T-Mobile would provide. Every message, number and count here is simulated.</div>
+
+<div class="wrap" id="app">
+  <header class="top">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">SS</div>
+      <div>
+        <h1>Scam Shield Network Console</h1>
+        <div class="sub"><span class="carrier">T-Mobile</span> network · fraud screening powered by Bouncer</div>
+      </div>
+    </div>
+    <div class="controls">
+      <span id="liveState" class="chip" style="padding:4px 9px"><span class="live-dot"></span>Live</span>
+      <select aria-label="Region">
+        <option>North Texas (ZIP3 750–762)</option>
+        <option>Texas</option>
+        <option>All US</option>
+      </select>
+      <div class="seg" role="group" aria-label="Time range">
+        <button aria-pressed="false">1h</button>
+        <button aria-pressed="true">24h</button>
+        <button aria-pressed="false">7d</button>
+      </div>
+      <button class="btn" id="pauseBtn" aria-pressed="false">Pause feed</button>
+      <button class="btn" id="themeBtn" aria-label="Toggle dark mode">◐</button>
+    </div>
+  </header>
+
+  <!-- KPI tiles -->
+  <section class="grid tiles" aria-label="Last 24 hours">
+    <div class="card tile hero">
+      <div class="label">Users warned before they had to ask</div>
+      <div class="value" id="heroVal">9,412</div>
+      <div class="delta"><span class="up-good">▲ 38%</span> vs yesterday · no screenshot or text to Bouncer needed</div>
+      <svg class="spark" id="sparkHero" aria-hidden="true"></svg>
+    </div>
+    <div class="card tile">
+      <div class="label">Messages screened</div>
+      <div class="value" id="kScreened">18.4M</div>
+      <div class="delta">in-network, content discarded</div>
+    </div>
+    <div class="card tile">
+      <div class="label">Scams detected</div>
+      <div class="value" id="kScams">41.2K</div>
+      <div class="delta">0.22% of traffic</div>
+    </div>
+    <div class="card tile">
+      <div class="label">High risk</div>
+      <div class="value" id="kHigh">3,118</div>
+      <div class="delta">codes, payments, callbacks</div>
+    </div>
+    <div class="card tile">
+      <div class="label">Median time to warning</div>
+      <div class="value">1.4 s</div>
+      <div class="delta">message arrives → alert sent</div>
+    </div>
+  </section>
+
+  <!-- Queue + live feed -->
+  <div class="section-title"><span class="tag">Detect</span><h2>Incoming messages</h2><p>High-risk fraud is pulled out of the stream into its own queue.</p></div>
+  <section class="grid main" style="grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start;">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>High-risk queue</h2>
+          <div class="hint">Sorted newest first. Each recipient was already warned automatically; agents review edge cases.</div>
+        </div>
+        <span class="chip" id="queueCount">6 open</span>
+      </div>
+      <div class="table-wrap">
+        <table class="queue" aria-label="High-risk messages">
+          <thead><tr><th>Risk</th><th>Time</th><th>To · from</th><th>Pattern</th><th>Red flags</th><th>Action taken</th></tr></thead>
+          <tbody id="queueBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Live network feed</h2>
+          <div class="hint">Every message is scored as it arrives. Person-to-person texts that score safe are never shown.</div>
+        </div>
+        <div class="seg" role="group" aria-label="Feed filter" id="feedFilter">
+          <button aria-pressed="true" data-f="all">All</button>
+          <button aria-pressed="false" data-f="flagged">Flagged</button>
+        </div>
+      </div>
+      <ul class="feed" id="feed" aria-live="polite"></ul>
+    </div>
+  </section>
+
+  <!-- Patterns -->
+  <div class="section-title"><span class="tag">Learn</span><h2>Viral scam patterns</h2><p>Messages are grouped into anonymized templates; a template that spreads fast across ZIP codes is flagged as spiking.</p></div>
+  <section class="grid patterns">
+    <div class="card">
+      <div class="card-head"><div><h2>Active patterns</h2><div class="hint">Select one to see where it's spreading.</div></div></div>
+      <div class="plist" id="plist"></div>
+    </div>
+    <div class="grid" style="gap:16px">
+      <div class="card" id="lineCard">
+        <div class="card-head">
+          <div><h2>Detections per hour, top 3 patterns</h2><div class="hint">Last 24 hours, North Texas</div></div>
+          <button class="btn small view-toggle" data-target="lineCard">Table view</button>
+        </div>
+        <div class="legend" id="lineLegend"></div>
+        <div class="chart" id="lineChart"></div>
+        <div class="chart-table table-wrap" id="lineTable"></div>
+      </div>
+      <div class="card" id="barCard">
+        <div class="card-head">
+          <div><h2 id="barTitle">Where it's spreading</h2><div class="hint">Detections by ZIP3, last 48 hours</div></div>
+          <button class="btn small view-toggle" data-target="barCard">Table view</button>
+        </div>
+        <div class="chart" id="barChart"></div>
+        <div class="chart-table table-wrap" id="barTable"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Proactive warnings -->
+  <div class="section-title"><span class="tag">Educate</span><h2>Proactive warnings</h2><p>When a pattern spikes, people in the affected area get one short heads-up before the scam reaches them.</p></div>
+  <section class="grid two">
+    <div class="card">
+      <div class="card-head"><div><h2>Warning ready to send</h2><div class="hint">Written from the spiking template. Max one local warning per person per day.</div></div></div>
+      <div class="phone" aria-label="Preview of the warning text">
+        <div class="bar">iMessage · now</div>
+        <div class="who">Bouncer<small>T-Mobile scam help</small></div>
+        <div class="bubble" id="warnText"></div>
+        <div class="stamp">Delivered</div>
+      </div>
+      <div class="composer" style="margin-top:14px">
+        <div class="field"><label>Audience</label><div class="val" id="warnAudience"></div></div>
+        <div class="field"><label>Expected reach</label><div class="val" id="warnReach"></div></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button class="btn primary" data-toast="Simulated: warning queued for 214,880 people. Nothing was sent.">Send warning</button>
+          <button class="btn" data-toast="Simulated: scheduled for 9:00 AM local time.">Schedule for 9 AM</button>
+          <button class="btn" data-toast="Simulated: opened in the editor.">Edit wording</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h2>Recent warning campaigns</h2><div class="hint">Did the warning work? Compared with similar people who weren't warned yet.</div></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Warning</th><th>Area</th><th class="num">Sent</th><th class="num">Read</th><th class="num">Reported back</th><th class="num">Scam-link taps</th></tr></thead>
+          <tbody id="campaignBody"></tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin:12px 0 0; font-size:12.5px">"Reported back" = people who forwarded a matching text to Bouncer after the warning. "Scam-link taps" compares link taps against the unwarned group.</p>
+    </div>
+  </section>
+
+  <!-- Automatic user alerts -->
+  <div class="section-title"><span class="tag">Protect</span><h2>Automatic alerts on received scams</h2><p>No screenshot, no forwarding: the network spots the scam and Bouncer texts the person within seconds.</p></div>
+  <section class="card">
+    <div class="flow">
+      <div class="step"><div class="n">1</div><b>Text arrives</b><span>A message reaches a customer on the T-Mobile network.</span><div class="timing">0.0 s</div></div>
+      <div class="step"><div class="n">2</div><b>Screened in-network</b><span>Jev scores red flags (link mismatch, payment ask, urgency). The text isn't stored.</span><div class="timing">+0.4 s</div></div>
+      <div class="step"><div class="n">3</div><b>Matched to a pattern</b><span>Same template as a spiking scam, so the confidence goes up.</span><div class="timing">+0.6 s</div></div>
+      <div class="step"><div class="n">4</div><b>Customer alerted</b><span>One iMessage from Bouncer: what it is, what not to do, and the real contact.</span><div class="timing">+1.4 s</div></div>
+    </div>
+    <div class="grid two">
+      <div class="phone" aria-label="Preview of an automatic alert">
+        <div class="bar">iMessage · 2:14 PM</div>
+        <div class="who">Bouncer<small>T-Mobile scam help</small></div>
+        <div class="bubble">⚠️ The text you just got from •••-4417 looks like a fake toll notice. Don't tap its link or pay anything.</div>
+        <div class="bubble">📞 To check with the real NTTA: (972) 818-6882 or <a href="#" onclick="return false">ntta.org</a>. Already paid? Reply HELP and I'll walk you through it.</div>
+        <div class="stamp">Delivered · read 2:15 PM</div>
+      </div>
+      <div>
+        <h2 style="font-size:15px; margin:0 0 4px">Alerts sent in the last hour</h2>
+        <div class="hint" style="color:var(--muted); font-size:12.5px; margin-bottom:10px">What people did after the alert.</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>To</th><th>Pattern</th><th class="num">Alert after</th><th>What they did</th></tr></thead>
+            <tbody id="alertBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div><b>Detection:</b> TypeSafe Jev 1.14.0, the same model Bouncer uses today. On 1,160 held-out messages it caught 104 of 106 scams (98.1%) and flagged 2.0% of real messages.</div>
+    <div><b>Privacy:</b> message text is scored in-network and discarded. This console shows anonymized templates (<span class="ph">{LINK}</span>, <span class="ph">{AMOUNT}</span>), masked numbers, and ZIP3 areas, never names, full numbers or personal texts.</div>
+    <div><b>Concept only:</b> Bouncer today works when customers text it, send screenshots or merge it into calls. This view needs carrier-level access that doesn't exist yet.</div>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  "use strict";
+  // ---------- deterministic pseudo-random (so the mock looks the same every load) ----------
+  let seed = 20261108;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const fmt = (n) => n.toLocaleString("en-US");
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const $ = (s) => document.querySelector(s);
+
+  // ---------- data ----------
+  const LEVEL = {
+    high: { label: "High risk", icon: "!" },
+    likely: { label: "Likely scam", icon: "!" },
+    unsure: { label: "Not sure", icon: "?" },
+    safe: { label: "Looks safe", icon: "✓" },
+  };
+  const badge = (l) => `<span class="badge ${l}"><i aria-hidden="true">${LEVEL[l].icon}</i>${LEVEL[l].label}</span>`;
+  const tpl = (s) => s.replace(/\{([A-Z]+)\}/g, '<span class="ph">{$1}</span>');
+
+  const ZIPS = ["750 Plano", "751 Dallas S", "752 Dallas", "760 Arlington", "761 Fort Worth", "762 Denton"];
+
+  const PATTERNS = [
+    {
+      id: "toll", short: "NTTA toll", name: "Unpaid toll (NTTA / TxTag)", slot: 1, status: "Spiking", trend: "+312%", hits: 6420, first: "6 h ago",
+      template: "NTTA: You have an unpaid toll of {AMOUNT}. Pay by {DATE} to avoid a late fee: {LINK}",
+      domains: "ntta-tollpay[.]top, txtag-billing[.]xyz", zip: [1840, 620, 1310, 1190, 980, 480],
+      flags: ["link mismatch", "payment ask", "urgency"], type: "toll_or_delivery",
+      warn: "Heads up: fake toll texts are spreading in North Texas. NTTA never texts you a payment link. Check your account at ntta.org or call (972) 818-6882.",
+      audience: "Opted-in customers in ZIP3 750, 752, 760", reach: "214,880 people · 1 text each",
+    },
+    {
+      id: "usps", short: "USPS redelivery", name: "USPS redelivery fee", slot: 2, status: "Rising", trend: "+84%", hits: 3980, first: "2 days ago",
+      template: "USPS: Your package is on hold due to an incomplete address. Update within 24 hours: {LINK}",
+      domains: "usps-redeliver[.]info, usps-track-help[.]com", zip: [720, 540, 910, 640, 760, 410],
+      flags: ["link mismatch", "impersonation", "urgency"], type: "toll_or_delivery",
+      warn: "Heads up: fake USPS \"package on hold\" texts are going around. USPS doesn't text links to update your address. Track packages only at usps.com.",
+      audience: "Opted-in customers in ZIP3 750–762", reach: "388,420 people · 1 text each",
+    },
+    {
+      id: "bank", short: "Bank call-back", name: "Fake bank fraud alert (call back)", slot: 3, status: "Rising", trend: "+41%", hits: 2210, first: "4 days ago",
+      template: "Chase Fraud Alert: Did you try a {AMOUNT} purchase at {STORE}? Reply YES or NO. If NO, call {PHONE} now.",
+      domains: "callback number {PHONE}", zip: [610, 280, 540, 330, 290, 160],
+      flags: ["callback", "impersonation", "asks for code"], type: "bank_or_card",
+      warn: "Heads up: fake bank \"fraud alert\" texts ask you to call a number. Your bank will never ask you to read back a code. Call the number on the back of your card instead.",
+      audience: "Opted-in customers in ZIP3 750–762", reach: "388,420 people · 1 text each",
+    },
+    {
+      id: "jury", short: "Jury warrant", name: "Missed jury duty warrant", slot: 0, status: "Steady", trend: "+4%", hits: 640, first: "9 days ago",
+      template: "{COUNTY} County Sheriff: You missed jury duty and a warrant was issued. Call {PHONE} today to resolve it.",
+      domains: "callback number {PHONE}", zip: [120, 90, 160, 110, 100, 60],
+      flags: ["impersonation", "callback", "threat"], type: "government",
+      warn: "Heads up: fake \"missed jury duty\" texts are going around. Courts and sheriffs never ask for payment by text or phone. Call your county clerk's number from its .gov website.",
+      audience: "Opted-in customers in ZIP3 750–762", reach: "388,420 people · 1 text each",
+    },
+    {
+      id: "wrong", short: "Wrong number", name: "\"Wrong number\" friendly opener", slot: 0, status: "Fading", trend: "−22%", hits: 410, first: "3 weeks ago",
+      template: "Hi {NAME}, is this still your number? It's {NAME} from the yoga class 😊",
+      domains: "none (leads to a crypto pitch later)", zip: [90, 40, 80, 70, 80, 50],
+      flags: ["stranger", "investment lure"], type: "romance_or_investment",
+      warn: "Heads up: \"wrong number\" texts from friendly strangers often turn into crypto or investment scams. It's fine not to reply.",
+      audience: "Opted-in customers in ZIP3 750–762", reach: "388,420 people · 1 text each",
+    },
+  ];
+  const STATUS = { Spiking: "high", Rising: "likely", Steady: "unsure", Fading: "safe" };
+  const STATUS_ICON = { Spiking: "▲", Rising: "↗", Steady: "→", Fading: "↘" };
+
+  const LEGIT = [
+    { level: "safe", kind: "2FA code", from: "short code 727274", body: "Your Chase verification code is {CODE}. Don't share it with anyone." },
+    { level: "safe", kind: "pharmacy", from: "short code 287898", body: "CVS: Your prescription is ready for pickup at {STORE}." },
+    { level: "safe", kind: "delivery", from: "short code 69877", body: "UPS: Your package will arrive today by {TIME}. Track at ups.com" },
+    { level: "safe", kind: "appointment", from: "short code 44624", body: "Reminder: your appointment is {DATE} at {TIME}. Reply C to confirm." },
+    { level: "safe", kind: "personal", from: "(214) •••-•• 63", body: null },
+    { level: "safe", kind: "personal", from: "(817) •••-•• 09", body: null },
+    { level: "unsure", kind: "account notice", from: "(888) •••-•• 41", body: "Your account settings were updated. If this wasn't you, review here: {LINK}" },
+  ];
+  const SCAMS = [
+    { level: "high", p: "toll", from: "+1 (945) •••-4417" },
+    { level: "high", p: "toll", from: "toll-notice@•••.top" },
+    { level: "likely", p: "usps", from: "+1 (469) •••-2290" },
+    { level: "high", p: "bank", from: "+1 (888) •••-0193" },
+    { level: "likely", p: "jury", from: "+1 (972) •••-7781" },
+    { level: "unsure", p: "wrong", from: "+1 (657) •••-3302" },
+  ];
+
+  // ---------- clock ----------
+  let clock = new Date(2026, 10, 8, 14, 9, 0);
+  const tick = (sec) => { clock = new Date(clock.getTime() + sec * 1000); };
+  const hhmm = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const hhmmss = (d) => d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const maskTo = () => `(${pick(["214", "469", "972", "817", "682", "940"])}) •••-${String(1000 + Math.floor(rnd() * 9000)).slice(-4)}`;
+  const patternById = (id) => PATTERNS.find((p) => p.id === id);
+
+  // ---------- high-risk queue ----------
+  const queue = [];
+  function queueRow(q, fresh) {
+    const p = patternById(q.p);
+    return `<tr class="${fresh ? "fresh" : ""}" data-toast="Simulated: opened this case for agent review." title="Click to review">
+      <td>${badge("high")}</td>
+      <td class="mono nowrap">${hhmm(q.at)}</td>
+      <td class="mono nowrap">${q.to} <span class="muted">· ${q.zip.slice(0, 3)}</span><div class="muted">from ${q.from}</div></td>
+      <td class="nowrap">${p.short}</td>
+      <td><div class="flags">${p.flags.slice(0, 2).map((f) => `<span class="chip">${f}</span>`).join("")}</div></td>
+      <td><span class="ok nowrap">✓ Warned · ${q.after}</span><div class="muted" style="font-size:11.5px">${q.extra}</div></td>
+    </tr>`;
+  }
+  function renderQueue(freshFirst = false) {
+    $("#queueBody").innerHTML = queue.map((q, i) => queueRow(q, freshFirst && i === 0)).join("");
+    $("#queueCount").textContent = `${queue.length} open`;
+  }
+  function addToQueue(item, fresh) {
+    queue.unshift({
+      at: item.at, to: item.to, zip: item.zip, from: item.from, p: item.p,
+      after: `${(1 + rnd() * 0.9).toFixed(1)} s`,
+      extra: pick(["Link blocked", "Sender reported", "Sender rate-limited"]),
+    });
+    if (queue.length > 9) queue.pop();
+    renderQueue(fresh);
+  }
+
+  // ---------- live feed ----------
+  const feedItems = [];
+  let feedFilter = "all";
+  function makeItem() {
+    const isScam = rnd() < 0.34;
+    const at = new Date(clock);
+    const zip = pick(ZIPS);
+    if (isScam) {
+      const s = pick(SCAMS);
+      const p = patternById(s.p);
+      return { at, level: s.level, from: s.from, body: p.template, kind: p.name, p: s.p, zip, to: maskTo() };
+    }
+    const l = pick(LEGIT);
+    return { at, level: l.level, from: l.from, body: l.body, kind: l.kind, p: null, zip, to: maskTo() };
+  }
+  function feedRow(it, isNew) {
+    const pulled = it.level === "high" ? `<span class="pulled">↑ moved to high-risk queue</span>` : "";
+    const body = it.body ? tpl(it.body) : `<span class="hidden-body">Person-to-person text · scored safe · content not shown</span>`;
+    const pattern = it.p ? `<span class="chip">pattern: ${patternById(it.p).short}</span>` : `<span>${it.kind}</span>`;
+    return `<li class="${isNew ? "new" : ""}">
+      <span class="t">${hhmmss(it.at)}</span>
+      <span class="lvl">${badge(it.level)}</span>
+      <div class="msg"><div class="meta"><span class="mono">${it.from}</span>${pattern}${pulled}</div><div class="body">${body}</div></div>
+    </li>`;
+  }
+  function renderFeed(newest = false) {
+    const shown = feedItems.filter((it) => feedFilter === "all" || it.level !== "safe").slice(0, 6);
+    $("#feed").innerHTML = shown.map((it, i) => feedRow(it, newest && i === 0)).join("");
+  }
+  function pushFeed(animate = true) {
+    tick(1 + Math.floor(rnd() * 4));
+    const it = makeItem();
+    feedItems.unshift(it);
+    if (feedItems.length > 60) feedItems.pop();
+    renderFeed(animate && (feedFilter === "all" || it.level !== "safe"));
+    if (it.level === "high") {
+      addToQueue(it, animate);
+      bump("#heroVal", 1);
+      bump("#kHigh", 1);
+    }
+  }
+  function bump(sel, by) {
+    const el = $(sel);
+    const n = parseInt(el.textContent.replace(/\D/g, ""), 10) + by;
+    el.textContent = fmt(n);
+  }
+
+  // ---------- pattern list ----------
+  let selected = "toll";
+  const seriesVar = (slot) => (slot ? `var(--s${slot})` : "var(--muted)");
+  function renderPatterns() {
+    $("#plist").innerHTML = PATTERNS.map((p) => `
+      <button class="pcard" aria-pressed="${p.id === selected}" data-id="${p.id}">
+        <div class="row1">
+          <span class="name">${p.slot ? `<span class="key" style="background:${seriesVar(p.slot)}"></span>` : ""}${p.name}</span>
+          <span class="badge ${STATUS[p.status]}"><i aria-hidden="true">${STATUS_ICON[p.status]}</i>${p.status}</span>
+        </div>
+        <div class="tpl">${tpl(p.template)}</div>
+        <div class="stats">
+          <span><b>${fmt(p.hits)}</b> hits · 48 h</span>
+          <span class="trend">${p.trend} vs prior 48 h</span>
+          <span>first seen ${p.first}</span>
+        </div>
+        <div class="stats" style="margin-top:4px"><span class="mono">${p.domains}</span></div>
+      </button>`).join("");
+    document.querySelectorAll(".pcard").forEach((b) =>
+      b.addEventListener("click", () => {
+        selected = b.dataset.id;
+        renderPatterns();
+        renderBar();
+        renderLine();
+        renderWarning();
+      }),
+    );
+  }
+
+  // ---------- hourly series for the top 3 patterns ----------
+  const HOURS = Array.from({ length: 24 }, (_, i) => i); // 3 PM yesterday … 2 PM today
+  const hourLabel = (i) => { const h = (15 + i) % 24; return h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`; };
+  const daytime = (i) => { const h = (15 + i) % 24; return h >= 8 && h <= 21 ? 1 : h >= 6 && h <= 23 ? 0.55 : 0.18; };
+  const SERIES = [
+    { id: "toll", slot: 1, values: HOURS.map((i) => Math.round((40 + i * i * 1.15) * daytime(i) * (0.85 + rnd() * 0.3))) },
+    { id: "usps", slot: 2, values: HOURS.map((i) => Math.round((70 + i * 3.2) * daytime(i) * (0.85 + rnd() * 0.3))) },
+    { id: "bank", slot: 3, values: HOURS.map((i) => Math.round((48 + i * 1.4) * daytime(i) * (0.8 + rnd() * 0.4))) },
+  ];
+
+  // ---------- line chart (2px lines, end dots with surface ring, crosshair tooltip) ----------
+  function renderLine() {
+    const host = $("#lineChart");
+    const W = Math.max(320, host.clientWidth || 640), H = 250;
+    const m = { t: 10, r: W < 480 ? 92 : 128, b: 26, l: 40 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const max = Math.ceil(Math.max(...SERIES.flatMap((s) => s.values)) / 200) * 200;
+    const x = (i) => m.l + (i / (HOURS.length - 1)) * iw;
+    const y = (v) => m.t + ih - (v / max) * ih;
+    const ticks = [0, max / 4, max / 2, (3 * max) / 4, max];
+    const dim = (s) => (selected === s.id || !SERIES.some((z) => z.id === selected) ? 1 : 0.28);
+    let svg = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Detections per hour for the top three patterns">`;
+    for (const t of ticks) svg += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)" stroke-width="1"/>
+      <text x="${m.l - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${fmt(t)}</text>`;
+    for (const i of [0, 6, 12, 18, 23]) svg += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)">${hourLabel(i)}</text>`;
+    svg += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)" stroke-width="1"/>`;
+    // end labels: nudge apart only via leader lines if they'd collide
+    const ends = SERIES.map((s) => ({ s, y: y(s.values.at(-1)) })).sort((a, b) => a.y - b.y);
+    for (let k = 1; k < ends.length; k++) ends[k].ly = Math.max(ends[k].y, (ends[k - 1].ly ?? ends[k - 1].y) + 15);
+    ends[0].ly = ends[0].y;
+    for (const s of SERIES) {
+      const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+      svg += `<polyline points="${pts}" fill="none" stroke="var(--s${s.slot})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="${dim(s)}"/>`;
+    }
+    for (const e of ends) {
+      const s = e.s, vx = x(HOURS.length - 1);
+      svg += `<circle cx="${vx}" cy="${e.y}" r="4.5" fill="var(--s${s.slot})" stroke="var(--surface)" stroke-width="2" opacity="${dim(s)}"/>`;
+      if (Math.abs(e.ly - e.y) > 1) svg += `<line x1="${vx + 6}" y1="${e.y}" x2="${vx + 14}" y2="${e.ly}" stroke="var(--axis)" stroke-width="1"/>`;
+      svg += `<text x="${vx + 16}" y="${e.ly + 4}" font-size="11.5" fill="var(--ink-2)">${fmt(s.values.at(-1))}${W < 480 ? "" : ` · ${patternById(s.id).short}`}</text>`;
+    }
+    svg += `<line id="xh" x1="0" x2="0" y1="${m.t}" y2="${m.t + ih}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>`;
+    svg += `<rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="hit"/></svg><div class="tooltip" id="ltt"></div>`;
+    host.innerHTML = svg;
+
+    const hit = host.querySelector("#hit"), xh = host.querySelector("#xh"), tt = host.querySelector("#ltt");
+    const move = (ev) => {
+      const r = host.querySelector("svg").getBoundingClientRect();
+      const px = ((ev.clientX - r.left) / r.width) * W;
+      const i = Math.max(0, Math.min(HOURS.length - 1, Math.round(((px - m.l) / iw) * (HOURS.length - 1))));
+      xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.setAttribute("visibility", "visible");
+      tt.innerHTML = `<div class="tt-title">${hourLabel(i)}</div>` + SERIES.map((s) =>
+        `<div class="tt-row"><span class="key" style="background:var(--s${s.slot})"></span>${patternById(s.id).short}<b>${fmt(s.values[i])}</b></div>`).join("");
+      tt.style.display = "block";
+      const left = (x(i) / W) * r.width;
+      tt.style.left = `${Math.min(left + 12, r.width - tt.offsetWidth - 4)}px`;
+      tt.style.top = `8px`;
+    };
+    hit.addEventListener("mousemove", move);
+    hit.addEventListener("mouseleave", () => { tt.style.display = "none"; xh.setAttribute("visibility", "hidden"); });
+
+    $("#lineLegend").innerHTML = SERIES.map((s) => `<span><span class="key" style="background:var(--s${s.slot})"></span>${patternById(s.id).name}</span>`).join("");
+    $("#lineTable").innerHTML = `<table><thead><tr><th>Hour</th>${SERIES.map((s) => `<th class="num">${patternById(s.id).name}</th>`).join("")}</tr></thead><tbody>${
+      HOURS.map((i) => `<tr><td>${hourLabel(i)}</td>${SERIES.map((s) => `<td class="num">${fmt(s.values[i])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  }
+
+  // ---------- bar chart (single series, ≤ 24px bars, value at the tip) ----------
+  function renderBar() {
+    const p = patternById(selected);
+    $("#barTitle").textContent = `Where "${p.name}" is spreading`;
+    const host = $("#barChart");
+    const W = Math.max(320, host.clientWidth || 640);
+    const rows = ZIPS.map((z, i) => ({ z, v: p.zip[i] })).sort((a, b) => b.v - a.v);
+    const band = 34, H = rows.length * band + 8;
+    const m = { l: 108, r: 64 };
+    const iw = W - m.l - m.r;
+    const max = Math.max(...rows.map((r) => r.v));
+    let svg = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Detections by ZIP3">`;
+    rows.forEach((r, i) => {
+      const yy = 4 + i * band, bh = 20, w = Math.max(2, (r.v / max) * iw);
+      // 4px rounded data-end, square at the baseline
+      const path = `M${m.l},${yy} h${w - 4} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h-${w - 4} z`;
+      svg += `<text x="${m.l - 10}" y="${yy + 14}" text-anchor="end" font-size="12" fill="var(--ink-2)">ZIP ${r.z}</text>
+        <path d="${path}" fill="var(--bar)" data-z="${r.z}" data-v="${r.v}" class="bar"/>
+        <rect x="${m.l}" y="${yy - 4}" width="${iw + m.r}" height="${band}" fill="transparent" data-z="${r.z}" data-v="${r.v}" class="barhit"/>
+        <text x="${m.l + w + 8}" y="${yy + 14}" font-size="12" fill="var(--ink)" font-weight="600">${fmt(r.v)}</text>`;
+    });
+    svg += `<line x1="${m.l}" x2="${m.l}" y1="0" y2="${H}" stroke="var(--axis)" stroke-width="1"/></svg><div class="tooltip" id="btt"></div>`;
+    host.innerHTML = svg;
+    const tt = host.querySelector("#btt");
+    const total = rows.reduce((a, r) => a + r.v, 0);
+    host.querySelectorAll(".barhit").forEach((h) => {
+      h.addEventListener("mousemove", (ev) => {
+        const r = host.getBoundingClientRect();
+        tt.innerHTML = `<div class="tt-title">ZIP ${h.dataset.z}</div><div class="tt-row">Detections<b>${fmt(+h.dataset.v)}</b></div><div class="tt-row">Share of this pattern<b>${Math.round((+h.dataset.v / total) * 100)}%</b></div>`;
+        tt.style.display = "block";
+        tt.style.left = `${Math.min(ev.clientX - r.left + 12, r.width - tt.offsetWidth - 4)}px`;
+        tt.style.top = `${ev.clientY - r.top - 10}px`;
+      });
+      h.addEventListener("mouseleave", () => (tt.style.display = "none"));
+    });
+    $("#barTable").innerHTML = `<table><thead><tr><th>ZIP3</th><th class="num">Detections</th><th class="num">Share</th></tr></thead><tbody>${
+      rows.map((r) => `<tr><td>${r.z}</td><td class="num">${fmt(r.v)}</td><td class="num">${Math.round((r.v / total) * 100)}%</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  // ---------- proactive warning preview ----------
+  function renderWarning() {
+    const p = patternById(selected);
+    $("#warnText").textContent = p.warn;
+    $("#warnAudience").textContent = p.audience;
+    $("#warnReach").textContent = p.reach;
+  }
+
+  // ---------- campaigns + alerts tables ----------
+  const CAMPAIGNS = [
+    ["Fake toll texts (NTTA)", "750, 752, 760", 214880, 71, 1932, "−63%"],
+    ["USPS \"package on hold\"", "750–762", 388420, 66, 2410, "−48%"],
+    ["Bank \"fraud alert\" call-back", "750–762", 388420, 62, 1288, "−41%"],
+    ["Fake Medicare card renewal", "761, 762", 96210, 74, 403, "−57%"],
+  ];
+  $("#campaignBody").innerHTML = CAMPAIGNS.map((c) => `<tr><td>${c[0]}</td><td class="mono">${c[1]}</td><td class="num">${fmt(c[2])}</td><td class="num">${c[3]}%</td><td class="num">${fmt(c[4])}</td><td class="num ok">${c[5]}</td></tr>`).join("");
+
+  const ACTIONS = ["Deleted the text", "Reported it (REPORT)", "Asked Bouncer a question", "Blocked the sender", "No action yet", "Replied HELP (already paid)"];
+  const alerts = Array.from({ length: 6 }, (_, k) => {
+    const s = pick(SCAMS.filter((x) => x.level !== "unsure"));
+    const t = new Date(2026, 10, 8, 14, 8 - k * 7, 0);
+    return `<tr><td class="mono">${hhmm(t)}</td><td class="mono">${maskTo()}</td><td>${patternById(s.p).short}</td><td class="num">${(1 + rnd()).toFixed(1)} s</td><td>${pick(ACTIONS)}</td></tr>`;
+  });
+  $("#alertBody").innerHTML = alerts.join("");
+
+  // ---------- hero sparkline (de-emphasis hue, today in the accent) ----------
+  function renderSpark() {
+    const el = $("#sparkHero");
+    const vals = [5210, 5480, 5130, 5920, 6110, 5870, 6240, 6480, 6390, 6820, 6810, 9412];
+    const W = el.clientWidth || 300, H = 28, max = Math.max(...vals), min = Math.min(...vals) * 0.9;
+    const x = (i) => (i / (vals.length - 1)) * (W - 6) + 3, y = (v) => H - 3 - ((v - min) / (max - min)) * (H - 6);
+    el.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    el.innerHTML = `<polyline points="${vals.slice(0, -1).map((v, i) => `${x(i)},${y(v)}`).join(" ")}" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <line x1="${x(vals.length - 2)}" y1="${y(vals.at(-2))}" x2="${x(vals.length - 1)}" y2="${y(vals.at(-1))}" stroke="var(--brand)" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="${x(vals.length - 1)}" cy="${y(vals.at(-1))}" r="4" fill="var(--brand)" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+
+  // ---------- controls ----------
+  let timer = null, paused = false;
+  const startFeed = () => { timer = setInterval(() => pushFeed(true), 1700); };
+  $("#pauseBtn").addEventListener("click", (e) => {
+    paused = !paused;
+    e.currentTarget.textContent = paused ? "Resume feed" : "Pause feed";
+    e.currentTarget.setAttribute("aria-pressed", String(paused));
+    $("#liveState").classList.toggle("paused", paused);
+    $("#liveState").lastChild.textContent = paused ? "Paused" : "Live";
+    paused ? clearInterval(timer) : startFeed();
+  });
+  $("#feedFilter").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    feedFilter = b.dataset.f;
+    $("#feedFilter").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    renderFeed(false);
+  });
+  document.querySelectorAll(".seg[aria-label='Time range'] button").forEach((b) =>
+    b.addEventListener("click", () => {
+      b.parentElement.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      toast("Simulated: the mock always shows the last 24 hours.");
+    }),
+  );
+  document.querySelectorAll(".view-toggle").forEach((b) =>
+    b.addEventListener("click", () => {
+      const card = document.getElementById(b.dataset.target);
+      card.classList.toggle("show-table");
+      b.textContent = card.classList.contains("show-table") ? "Chart view" : "Table view";
+    }),
+  );
+  $("#themeBtn").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("ss-theme", root.dataset.theme); } catch {}
+  });
+  try { const t = localStorage.getItem("ss-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $("#toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-toast]");
+    if (b) toast(b.dataset.toast);
+  });
+
+  // ---------- boot ----------
+  for (let k = 0; k < 26; k++) pushFeed(false);
+  // make sure the queue opens with a few rows even if the seed is quiet
+  while (queue.length < 5) addToQueue({ at: new Date(clock.getTime() - queue.length * 140000), to: maskTo(), zip: pick(ZIPS), from: pick(SCAMS).from, p: pick(["toll", "toll", "bank", "usps"]) }, false);
+  renderQueue(false);
+  renderPatterns();
+  renderLine();
+  renderBar();
+  renderWarning();
+  renderSpark();
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) startFeed();
+  let rz;
+  addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { renderLine(); renderBar(); renderSpark(); }, 120); });
+})();
+</script>
+</body>
+</html>
