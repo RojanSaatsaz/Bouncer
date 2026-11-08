@@ -4,6 +4,32 @@
 
 Built at HackUTD 2026 for the T-Mobile scam-prevention track and the Photon messaging-agent track.
 
+## Why this matters
+
+Scams are now one of the most common crimes in America, and they get worse every year.
+
+- **$15.9 billion.** That's what Americans reported losing to fraud in 2025, a record and roughly a quarter more than the year before. The FTC got **3 million fraud reports**, and it says the real total is higher because many victims never report. ([FTC, March 2026](https://www.ftc.gov/news-events/news/press-releases/2026/03/ftc-testifies-joint-economic-committee-agencys-efforts-combat-fraud))
+- **$7.75 billion lost by people 60 and older** in 2025, up 59% in a single year, across more than 200,000 complaints to the FBI. ([FBI IC3 2025 report, via AARP](https://www.aarp.org/money/scams-fraud/fbi-ftc-report-2025-losses.html))
+- **AI is making it personal.** Seniors filed more than 3,100 FBI complaints about scams that used AI in 2025, with over $352 million lost. A scammer can clone a voice from a few seconds of audio taken from a social-media video or a voicemail, and in a McAfee survey 70% of people said they weren't sure they could tell a cloned voice from the real one.
+
+The cruelest version is the **"family emergency" call**: the phone rings and it's your grandson's voice, crying, saying he's been in an accident or arrested, he needs bail money right now, and please don't tell Mom. The voice is fake. The panic is real, and the money is gone within the hour.
+
+Spam labels act before a call and fraud reports come after the money is gone. The moment that matters is the middle, while the scammer is still talking. That's where Bouncer sits.
+
+## Voice-clone calls: Bouncer checks with your real family
+
+A cloned voice can sound exactly like your grandson. It can't answer from his real phone. So Bouncer calls him there.
+
+1. **Bouncer listens.** You merge Bouncer into the call (or text it "Mom is calling, she says she's in trouble"). It stays silent and scores every turn of the conversation.
+2. **It spots the pattern.** When the caller claims to be a family member in trouble, Bouncer texts *you*, privately: *"Ask him for the family safe word. Don't say it yourself, and don't send money yet."* The person on the line never hears it.
+3. **It calls your real relative.** With your YES by text, Bouncer places its own phone call to the number your family registered for that person and checks that they're okay.
+4. **It texts you the truth.** If your relative is safe and never called you, Bouncer tells you to hang up. If they really do need help, it tells you that too.
+5. **The whole family knows.** Everyone in your family circle who turned on alerts gets a text that someone in the family was just targeted by a fake family-emergency scam (the type of scam only, never the details).
+
+Set it up by texting **SET UP FAMILY**: add each person the way you call them ("Grandma", "Jake"), their phone number, and a safe word only your family knows. Family members join with a code by text. The safe word is encrypted and Bouncer never says it out loud, because the voice on the other end of the call might be the scammer.
+
+What used to leave a panicked grandparent alone with a stranger's script now ends with a text from someone they trust, *before* any money moves.
+
 ---
 
 ## Try it yourself (judges start here)
