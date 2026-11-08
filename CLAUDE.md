@@ -17,7 +17,7 @@ Users text Bouncer on iMessage (chat + screenshots) and call it, or merge it int
 - PostgreSQL on Railway via `pg` (no ORM)
 - Photon 2.0: iMessage line (text + images) via Socket.IO events + `sendMessage`; voice number connected to ElevenLabs over SIP
 - TypeSafe Jev: every scam decision (text only, calibrated probabilities)
-- Gemini API: reads screenshots, writes reply wording
+- DeepSeek V4.1 Flash via OpenRouter (`OPENROUTER_API_KEY`): reads screenshots, writes reply wording, chat and spoken replies (`src/detection/openrouter.ts`, routed through `src/detection/gemini.ts`). Gemini is the fallback when no OpenRouter key is set (`LLM_PROVIDER=gemini` forces it) and still does Flow 5 embeddings. The Gemini key is free tier (20 req/day on flash), which is why we switched.
 - ElevenLabs Agents: calls, with our server as the custom LLM (`POST /v1/chat/completions`)
 
 ## Commands
@@ -68,7 +68,7 @@ All in `.env` locally and Railway Variables in production. Never commit `.env`.
 
 `PHOTON_PROJECT_API_KEY, PHOTON_PROJECT_ID, PHOTON_IMESSAGE_HANDLE, PHOTON_VOICE_NUMBER, TYPESAFE_API_KEY, JEV_MODEL, GEMINI_API_KEY, GEMINI_MODEL, ELEVENLABS_API_KEY, ELEVENLABS_LISTEN_AGENT_ID, ELEVENLABS_VERIFY_AGENT_ID, ELEVENLABS_PHONE_NUMBER_ID, ELEVENLABS_WEBHOOK_SECRET, BOUNCER_LLM_SECRET, BOUNCER_INIT_TOKEN, SAFE_WORD_KEY, DATABASE_URL, PUBLIC_BASE_URL`
 
-Optional: `DASHBOARD_PASSWORD` (Flow 7 routes return 503 without it), `DEMO_VICTIM_PHONE`, `GEMINI_EMBED_MODEL`, `PATTERN_SPIKE_THRESHOLD` (default 3), `GEMINI_FAST_MODEL` (default `gemini-3.5-flash-lite`, for replies and voice), `PHOTON_SOCKET` (`on` on Railway, `off` in local `.env`, see rule 5), `DRY_RUN=1` (print iMessages instead of sending), `PORT` (pinned to 3000 on Railway to match the domain).
+Optional: `OPENROUTER_API_KEY` (strongly recommended; without it everything falls back to free-tier Gemini), `OPENROUTER_MODEL` / `OPENROUTER_FAST_MODEL` (default `deepseek/deepseek-v4.1-flash`), `LLM_PROVIDER`, `DASHBOARD_PASSWORD` (Flow 7 routes return 503 without it), `DEMO_VICTIM_PHONE`, `GEMINI_EMBED_MODEL`, `PATTERN_SPIKE_THRESHOLD` (default 3), `GEMINI_FAST_MODEL` (default `gemini-3.5-flash-lite`, for replies and voice), `PHOTON_SOCKET` (`on` on Railway, `off` in local `.env`, see rule 5), `DRY_RUN=1` (print iMessages instead of sending), `PORT` (pinned to 3000 on Railway to match the domain).
 
 Read them in one place (`src/config.ts`) and fail fast with a clear message if a required one is missing.
 
