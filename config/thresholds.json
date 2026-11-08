@@ -1,0 +1,12 @@
+{
+  "jev_model": null,
+  "unsure": 0.35,
+  "likely": 0.6,
+  "high": 0.85,
+  "asks_code_severe": 0.8,
+  "combo_severe": 0.6,
+  "known_contact_discount": 0.15,
+  "flag": 0.6,
+  "callback_flag": 0.7,
+  "note": "Spec defaults (Flow 1 step 8). Replaced by `npm run eval -- tune` (Flow 6 step 4)."
+}

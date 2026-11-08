@@ -13,7 +13,7 @@ Users text Bouncer on iMessage (chat + screenshots) and call it, or merge it int
 
 ## Stack
 
-- Node 20.6+ / TypeScript, ESM, run with `tsx` (no build step)
+- Node 22+ / TypeScript, ESM, run with `tsx` (no build step). `@photon-ai/api` requires Node 22
 - Hono + `@hono/node-server`, single server deployed on Railway
 - PostgreSQL on Railway via `pg` (no ORM)
 - Photon 2.0: iMessage line (text + images) via Socket.IO events + `sendMessage`; voice number connected to ElevenLabs over SIP
@@ -28,9 +28,16 @@ npm install
 npm run dev            # local server on :3000, reads .env
 npm start              # production (Railway)
 npm run migrate        # create tables (safe to rerun)
+npm run typecheck      # tsc --noEmit
+npm run test:message   # Flow 1 runner (fake envelopes, DRY_RUN)
+npm run test:call      # Flow 2 runner (simulated call turns)
+npm run seed:family    # Flow 3 demo circle + safe word
+npm run eval           # Flow 6 tuning / holdout scoring
 ```
 
-Local DB access without a public URL: `railway connect Postgres --tunnel-only`, then point `DATABASE_URL` in `.env` at the printed `127.0.0.1:<port>` URL.
+Local DB access without a public URL: `railway connect Postgres --tunnel-only --port 54329` (local `.env` already points at `127.0.0.1:54329`). The tunnel runs through the app container, so **reopen it after every Railway redeploy**.
+
+Verified API shapes and live measurements: `docs/API_NOTES.md`.
 
 ## Repo layout
 
@@ -58,6 +65,8 @@ All in `.env` locally and Railway Variables in production. Never commit `.env`.
 
 `PHOTON_PROJECT_API_KEY, PHOTON_PROJECT_ID, PHOTON_IMESSAGE_HANDLE, PHOTON_VOICE_NUMBER, TYPESAFE_API_KEY, JEV_MODEL, GEMINI_API_KEY, GEMINI_MODEL, ELEVENLABS_API_KEY, ELEVENLABS_LISTEN_AGENT_ID, ELEVENLABS_VERIFY_AGENT_ID, ELEVENLABS_PHONE_NUMBER_ID, ELEVENLABS_WEBHOOK_SECRET, BOUNCER_LLM_SECRET, BOUNCER_INIT_TOKEN, SAFE_WORD_KEY, DATABASE_URL, PUBLIC_BASE_URL`
 
+Optional: `GEMINI_FAST_MODEL` (default `gemini-3.5-flash-lite`, for replies and voice), `PHOTON_SOCKET` (`on` on Railway, `off` in local `.env`, see rule 5), `DRY_RUN=1` (print iMessages instead of sending), `PORT` (pinned to 3000 on Railway to match the domain).
+
 Read them in one place (`src/config.ts`) and fail fast with a clear message if a required one is missing.
 
 ## Hard rules
@@ -66,7 +75,7 @@ Read them in one place (`src/config.ts`) and fail fast with a clear message if a
 2. **Safe words** are AES-256-GCM encrypted with `SAFE_WORD_KEY`, never logged, never spoken by Bouncer, and compared in code.
 3. **Jev decides, Gemini words.** Gemini never decides whether something is a scam.
 4. **No action from voice alone.** Calling a relative or alerting the circle needs a "YES" by text, because a scammer on a merged call can say "Hey Bouncer" too.
-5. **One server instance at a time.** If local and Railway are both connected to Photon, every message gets two replies. Pause Railway while testing locally.
+5. **One server instance at a time.** If local and Railway are both connected to Photon, every message gets two replies. Railway holds the socket (`PHOTON_SOCKET=on`); local `.env` has `PHOTON_SOCKET=off`. To test iMessage locally, pause Railway first and flip the flag.
 6. **Don't guess API shapes.** Check the Photon, ElevenLabs, TypeSafe or Gemini docs (links below) or log a real payload first.
 7. **Secrets** only from env. No keys in code, logs or client bundles.
 
