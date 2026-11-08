@@ -55,6 +55,12 @@ export async function sendLines(
 
 /** Downloads attachment bytes into memory. Never write them to disk (CLAUDE.md rule 1). */
 export async function downloadAttachment(attachmentId: string): Promise<{ data: Buffer; contentType: string }> {
+  // Test runners only: DRY_RUN + "file:<path>" reads a local fixture instead of calling Photon.
+  if (config.photon.dryRun && attachmentId.startsWith("file:")) {
+    const { readFile } = await import("node:fs/promises");
+    const path = attachmentId.slice(5);
+    return { data: await readFile(path), contentType: path.endsWith(".png") ? "image/png" : "image/jpeg" };
+  }
   try {
     // Metadata (for contentType) and bytes in parallel: sequential took ~3.3 s for a 326 KB PNG.
     const [meta, blob] = await Promise.all([

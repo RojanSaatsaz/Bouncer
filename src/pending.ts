@@ -17,8 +17,21 @@ export function registerPendingHandler(kind: string, handler: Handler) {
   handlers.set(kind, handler);
 }
 
-export function setPending(userId: string, kind: string, data: Record<string, unknown> = {}, ttlMs = 10 * 60_000) {
+/**
+ * Parks an action until the user texts YES / NO. Each user has one slot. Low-priority actions
+ * (e.g. "call_feedback") pass `ifFree: true` so they never overwrite a live action such as
+ * "verify_call"; returns false when they were skipped.
+ */
+export function setPending(
+  userId: string,
+  kind: string,
+  data: Record<string, unknown> = {},
+  ttlMs = 10 * 60_000,
+  opts: { ifFree?: boolean } = {},
+): boolean {
+  if (opts.ifFree && peekPending(userId)) return false;
   pending.set(userId, { kind, data, expiresAt: Date.now() + ttlMs });
+  return true;
 }
 
 export function peekPending(userId: string): PendingAction | null {
