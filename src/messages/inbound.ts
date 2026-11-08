@@ -26,6 +26,7 @@ import { addUserTurn, addBouncerTurn, getHistory, setVerdict, markScreenshot } f
 import { hasLink } from "../photon/links.js";
 import { getCase, openCase, caseForModel, detectPayment, detectAmounts, setCaseContact } from "./case.js";
 import { findOfficialContact, contactLine, orgFromMessage, looksGovernment, type OfficialContact } from "../contacts/index.js";
+import { notifyFamily } from "../family/alerts.js";
 
 const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
 
@@ -490,6 +491,13 @@ async function reply(
     scamType: scan.risk.level === "safe" ? null : scan.scamType,
     flags: scan.flags,
     latencyMs,
+  });
+  // Family alerts (opt-in, whole family): type and level only, in the background.
+  void notifyFamily({
+    userId: user.id,
+    level: scan.risk.level,
+    scamType: scan.scamType,
+    source: msg.attachmentIds.length ? "screenshot" : "text",
   });
   await updateContactMemory(user.id, sender, scan.risk).catch((err) =>
     console.error(`[inbound] contact memory update failed: ${err?.message}`),

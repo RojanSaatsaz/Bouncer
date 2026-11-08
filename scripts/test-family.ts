@@ -29,6 +29,8 @@ const { resolvePending, peekPending, setPending } = await import("../src/pending
 const { dryRunOutbox } = await import("../src/photon/client.js");
 const { parseSystemVars } = await import("../src/voice/sse.js");
 const cr = await import("../src/family/crypto.js");
+const circleLib = await import("../src/family/circle.js");
+const { notifyFamily } = await import("../src/family/alerts.js");
 
 family.familyTimings.alertWaitMs = 1_500;
 family.familyTimings.retriggerCooldownMs = 0;
@@ -157,8 +159,8 @@ try {
     const input = {
       protected: { name: "Grandma", handle: H.gma },
       members: [
-        { name: "Jake", relationship: "grandson", phone: H.jake, role: "relative" as const },
-        { name: "Mom", relationship: "daughter", phone: H.mom, role: "guardian" as const },
+        { name: "Jake", title: "Grandson", phone: H.jake },
+        { name: "Mom", relationship: "daughter", phone: H.mom, role: "guardian" as const }, // legacy keys → alerts on
       ],
     };
     await seedCircle(input, TEST_WORD);
@@ -172,8 +174,12 @@ try {
     const circles = await one("SELECT count(*)::int AS n FROM circles WHERE protected_user_id = $1", [ids.gma]);
     check("seed is idempotent (one circle)", circles!.n === 1);
     check("seed linked existing users by handle", ids.gma === g.user.id && ids.mom === m.user.id);
-    const members = await query("SELECT role, joined, user_id FROM circle_members WHERE circle_id = $1", [ids.circle]);
-    check("members joined + linked", members.rows.length === 2 && members.rows.every((r: any) => r.joined && r.user_id));
+    const members = await query("SELECT name, title, role, joined, user_id, alerts FROM circle_members WHERE circle_id = $1", [ids.circle]);
+    const row = (n: string) => members.rows.find((r: any) => r.name === n);
+    check("3 members (Grandma has her own row) joined", members.rows.length === 3 && members.rows.every((r: any) => r.joined && r.role === "relative"));
+    check("Grandma organizes her own circle", (await one("SELECT organizer_user_id FROM circles WHERE id = $1", [ids.circle]))!.organizer_user_id === ids.gma);
+    check("titles: Grandson; legacy relationship → Daughter", row("Jake")?.title === "Grandson" && row("Mom")?.title === "Daughter");
+    check("alerts: legacy guardian on, others off", row("Mom")?.alerts === true && row("Jake")?.alerts === false && row("Grandma")?.alerts === false);
     check("no thread warnings for Grandma/Mom", !s.warnings.some((w) => /Grandma|Mom/.test(w)), s.warnings.join("; "));
     check("seed output has no word", !JSON.stringify(s).toLowerCase().includes("purple"));
   }
@@ -366,6 +372,58 @@ try {
     check("group thread → word not sent", r6 && !textsTo(SPACE.gma, t).some((x) => x.includes("purple")));
     await family.onVerifyCallEnded(v.conv, { failed: true });
     await resolvePending(ids.gma, "no");
+  }
+
+  section("7: titles, whole-family protection, family alerts");
+  {
+    const fam = [
+      { id: "a", name: "Rosa", title: "Mom" },
+      { id: "b", name: "Jake", title: "Grandson" },
+      { id: "c", name: "Sofia", title: "Bae" },
+    ] as any[];
+    const m = (text: string, org = true) => circleLib.matchByName(text, fam, org)?.name ?? null;
+    check('"mom is in trouble" → Rosa (organizer\'s title)', m("mom is in trouble") === "Rosa");
+    check('"my mother got arrested" → Rosa (synonym)', m("my mother got arrested") === "Rosa");
+    check('"Mom\'s car crashed" → Rosa (possessive)', m("Mom's car crashed") === "Rosa");
+    check('"bae is in trouble" → Sofia', m("bae is in trouble") === "Sofia");
+    check('"Sofia needs bail" → Sofia (first name)', m("Sofia needs bail") === "Sofia");
+    check('title ignored for non-organizers ("mom is in trouble")', m("mom is in trouble", false) === null);
+    check("two people named → no code match (Jev decides)", m("Jake says mom is hurt") === null);
+    check('"momentum" is not "mom"', m("the momentum is gone") === null);
+    check("label: organizer sees Mom, others see Rosa", circleLib.labelFor(fam[0], true) === "Mom" && circleLib.labelFor(fam[0], false) === "Rosa");
+    check("label: describing titles fall back to the name", circleLib.labelFor(fam[1], true) === "Jake");
+    check("pronouns from title", circleLib.memberPronouns({ title: "Grandma", relationship: null }).he === "she" && circleLib.memberPronouns({ title: "Bae", relationship: null }).he === "they");
+
+    // Mom (not the organizer) is targeted: Bouncer calls Jake, and texts go to Mom.
+    let t = mark();
+    const before = await verificationCount();
+    await family.startFamilyEmergency({ userId: ids.mom, content: "Jake called, he says he's in jail and needs bail", source: "text" });
+    await waitFor(async () => (await verificationCount()) > before);
+    const v = (await one("SELECT id, conversation_id, relative_id, target_user_id FROM verifications WHERE circle_id = $1 ORDER BY created_at DESC LIMIT 1", [ids.circle]))!;
+    check("member targeted → calls Jake, target is Mom", v.relative_id === ids.jake && v.target_user_id === ids.mom);
+    check("coach text goes to Mom", textsTo(SPACE.mom, t).some((x) => x.includes("I'm checking on Jake")), textsTo(SPACE.mom, t).join(" | "));
+    t = mark();
+    await family.onVerifyCallEnded(v.conversation_id, { failed: true });
+    check("result goes to Mom", textsTo(SPACE.mom, t).some((x) => x.startsWith("I couldn't reach Jake.")), textsTo(SPACE.mom, t).join(" | "));
+    await resolvePending(ids.mom, "no");
+    check("Grandma (alerts off) got no circle alert", textsTo(SPACE.gma, t).length === 0, textsTo(SPACE.gma, t).join(" | "));
+
+    // Instant family alerts for any likely scam.
+    t = mark();
+    const n1 = await notifyFamily({ userId: ids.gma, level: "likely_scam", scamType: "bank_or_card", source: "call" });
+    const a = textsTo(SPACE.mom, t);
+    check("Grandma's scam call → Mom (alerts on) texted", n1 === 1 && a[0]?.startsWith("⚠️ Family alert: Grandma just got a fake bank or card scam call."), a.join(" | "));
+    check("alert carries no content", !/\+1|\$|555/.test(a.join(" ")));
+    check("same scam again → no repeat", (await notifyFamily({ userId: ids.gma, level: "high_risk", scamType: "bank_or_card", source: "text" })) === 0);
+    check("unsure → no alert", (await notifyFamily({ userId: ids.gma, level: "unsure", scamType: "crypto", source: "text" })) === 0);
+    check("Mom's scam → nobody (Grandma has alerts off)", (await notifyFamily({ userId: ids.mom, level: "high_risk", scamType: "crypto", source: "text" })) === 0);
+    await query("UPDATE circle_members SET alerts = true WHERE circle_id = $1 AND user_id = $2", [ids.circle, ids.gma]);
+    t = mark();
+    const n2 = await notifyFamily({ userId: ids.mom, level: "high_risk", scamType: "tech_support", source: "screenshot" });
+    // Grandma organizes, so she sees her own title for Mom ("Daughter" describes → first name "Mom").
+    check("Grandma turned alerts on → gets Mom's alert", n2 === 1 && textsTo(SPACE.gma, t)[0]?.startsWith("⚠️ Family alert: Mom just got a fake tech support scam message."), textsTo(SPACE.gma, t).join(" | "));
+    check("family-emergency scam right after an emergency → covered, no duplicate", (await notifyFamily({ userId: ids.mom, level: "high_risk", scamType: "family_emergency", source: "call" })) === 0);
+    await query("UPDATE circle_members SET alerts = false WHERE circle_id = $1 AND user_id = $2", [ids.circle, ids.gma]);
   }
 
   section("privacy");

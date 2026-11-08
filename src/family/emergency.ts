@@ -1,5 +1,6 @@
-// SPEC Flow 3 steps 4–7 and 9–12: coach Grandma, decide who to call, tell her the result,
-// ask about losses, alert the circle (type and outcome only) and log the event (no content).
+// SPEC Flow 3 steps 4–7 and 9–12: coach the targeted family member, decide who to call (anyone else in
+// the family, found by the title the organizer gave them or by name), tell them the result, ask about
+// losses, alert everyone with family alerts on (type and outcome only) and log the event (no content).
 import { randomUUID } from "node:crypto";
 import { one, query } from "../db.js";
 import { askJev, choice } from "../detection/jev.js";
@@ -10,11 +11,14 @@ import { textUser, type User } from "../users.js";
 import { startRecovery } from "../recovery/index.js";
 import {
   cap,
-  getCircleForProtected,
-  getJoinedMembers,
+  getAlertRecipients,
+  getCallableFamily,
+  getCircleForUser,
   getMember,
   getSafeWordRow,
-  pronouns,
+  labelFor,
+  matchByName,
+  memberPronouns,
   protectedName as loadProtectedName,
   type Member,
 } from "./circle.js";
@@ -26,8 +30,10 @@ type Outcome = VerifyStatus | "coached_only" | "call_declined";
 
 interface Emergency {
   id: string;
-  userId: string; // the protected person
+  userId: string; // the family member being targeted
   circleId: string | null;
+  /** Organizer of the circle: sees family by their own titles ("Mom"); everyone else by first name. */
+  organizerId: string | null;
   protectedName: string;
   relative: Member | null;
   source: "text" | "call";
@@ -43,9 +49,21 @@ interface Emergency {
   eventId?: string;
 }
 
-/** Active emergency per protected user. In memory only. */
+/** Active emergency per targeted user. In memory only. */
 const emergencies = new Map<string, Emergency>();
 const short = (id: string) => id.slice(0, 8);
+
+/** The claimed relative as the targeted person knows them: "Mom" for the organizer, else "Rosa". */
+const relLabel = (em: Emergency) => (em.relative ? labelFor(em.relative, em.organizerId === em.userId) : "your family member");
+
+/**
+ * True if the family-emergency steps already cover this scam: one is still open for the user, or one
+ * ran in the last 30 min and this is the same family-emergency scam (it sends its own family alert).
+ */
+export function familyEmergencyCovers(userId: string, scamType: string | null | undefined): boolean {
+  const e = activeEmergency(userId);
+  return !!e && (e.stage !== "closed" || scamType === "family_emergency");
+}
 
 function activeEmergency(userId: string): Emergency | null {
   const e = emergencies.get(userId);
@@ -73,7 +91,7 @@ export async function startFamilyEmergencyImpl(args: { userId: string; content: 
   const prev = activeEmergency(userId);
   if (prev?.relative && source === "text") {
     // The user typed this themselves, and the router sends nothing else: always answer.
-    const name = prev.relative.name;
+    const name = relLabel(prev);
     if (prev.stage === "awaiting_yes") {
       // A text is the go-ahead rule 4 asks for: drop the "Reply YES" question and call now.
       clearPending(userId, "verify_call");
@@ -107,6 +125,7 @@ export async function startFamilyEmergencyImpl(args: { userId: string; content: 
     id: randomUUID().slice(0, 12),
     userId,
     circleId: null,
+    organizerId: null,
     protectedName: "your family member",
     relative: null,
     source,
@@ -117,29 +136,32 @@ export async function startFamilyEmergencyImpl(args: { userId: string; content: 
   };
   emergencies.set(userId, em);
 
-  const circle = await getCircleForProtected(userId);
+  const circle = await getCircleForUser(userId);
   if (!circle) return coachOnly(em, "no_circle", false);
   em.circleId = circle.id;
+  em.organizerId = circle.organizer_user_id;
   em.protectedName = await loadProtectedName(userId);
 
-  const [relatives, word] = await Promise.all([getJoinedMembers(circle.id, "relative"), getSafeWordRow(circle.id)]);
+  // Everyone in the family is protected, so anyone but the targeted person can be the one we call.
+  const [family, word] = await Promise.all([getCallableFamily(circle.id, userId), getSafeWordRow(circle.id)]);
   if (!word) return coachOnly(em, "no_safe_word", false);
-  if (!relatives.length) return coachOnly(em, "no_relatives", true);
+  if (!family.length) return coachOnly(em, "no_relatives", true);
 
-  const claimed = await findClaimedRelative(content, relatives);
+  const claimed = await findClaimedRelative(content, family, circle.organizer_user_id === userId, circle.organizer_user_id);
   if (!claimed) return coachOnly(em, "no_relative_named", true);
   em.relative = claimed;
 
-  const p = pronouns(claimed.relationship);
+  const p = memberPronouns(claimed);
+  const label = relLabel(em);
   const coach = `Ask ${p.him} for the family safe word. Don't say it yourself, and don't send money yet.`;
   if (source === "text") {
-    await textProtected(em, "coach", [`${coach} I'm checking on ${claimed.name}.`]);
+    await textProtected(em, "coach", [`${coach} I'm checking on ${label}.`]);
     await startCall(em);
   } else {
     // Rule 4: a call-triggered emergency needs a YES by text before Bouncer dials anyone.
     em.stage = "awaiting_yes";
     setPending(userId, "verify_call", { emergencyId: em.id });
-    await textProtected(em, "coach", [coach, `Reply YES and I'll call ${claimed.name}'s own number to check ${p.heIs} safe.`]);
+    await textProtected(em, "coach", [coach, `Reply YES and I'll call ${label}'s own number to check ${p.heIs} safe.`]);
   }
 }
 
@@ -154,16 +176,37 @@ async function coachOnly(em: Emergency, reason: string, hasWord: boolean) {
   await logEvent(em, 0);
 }
 
-/** Step 5: Jev choice `claimed_relative`, one label per joined relative plus `none`. Content stays in memory. */
-async function findClaimedRelative(content: string, relatives: Member[]): Promise<Member | null> {
+/**
+ * Step 5: who the message says is in trouble. First by code: a first name, or (for the organizer) the title
+ * they gave the person or a synonym ("Mom is in jail", "my mother"). Otherwise Jev choice `claimed_relative`,
+ * one label per family member plus `none`. Content stays in memory.
+ */
+async function findClaimedRelative(
+  content: string,
+  family: Member[],
+  viewerIsOrganizer: boolean,
+  organizerId: string | null,
+): Promise<Member | null> {
+  const direct = matchByName(content, family, viewerIsOrganizer);
+  if (direct) {
+    console.log(`[family] claimed_relative → member ${short(direct.id)} (title/name match)`);
+    return direct;
+  }
+  const orgName = organizerId && !viewerIsOrganizer ? await loadProtectedName(organizerId) : null;
   const byLabel = new Map<string, Member>();
   const criteria: Record<string, string> = {};
-  for (const m of relatives) {
+  for (const m of family) {
     const base = m.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "relative";
     let label = base === "none" ? "relative_none" : base;
     for (let i = 2; byLabel.has(label); i++) label = `${base}_${i}`;
     byLabel.set(label, m);
-    criteria[label] = cap(`${m.relationship ?? ""} ${m.name}`.trim());
+    // The title is the organizer's word: "the writer's Mom" for them, "whom Daniel calls Mom" for others.
+    const desc = !m.title
+      ? `${m.relationship ?? ""} ${m.name}`.trim()
+      : viewerIsOrganizer
+        ? `The writer's ${m.title} (${m.name})`
+        : `${m.name}, whom ${orgName ?? "the family"} calls ${m.title}`;
+    criteria[label] = cap(desc);
   }
   criteria.none = "None of these people, or the message doesn't say which family member it is";
   try {
@@ -187,7 +230,12 @@ async function findClaimedRelative(content: string, relatives: Member[]): Promis
 async function startCall(em: Emergency) {
   if (!em.circleId || !em.relative) return;
   em.stage = "calling";
-  const { verifyId } = await placeVerificationCall({ circleId: em.circleId, relative: em.relative, protectedName: em.protectedName });
+  const { verifyId } = await placeVerificationCall({
+    circleId: em.circleId,
+    relative: em.relative,
+    protectedName: em.protectedName,
+    targetUserId: em.userId,
+  });
   em.verificationId ??= verifyId;
 }
 
@@ -195,7 +243,7 @@ registerPendingHandler("verify_call", async (userId, data, answer) => {
   const em = activeEmergency(userId);
   if (!em || em.id !== data.emergencyId || em.stage !== "awaiting_yes" || !em.relative) return false; // stale: router replies
   if (answer === "yes") {
-    await textProtected(em, "call-yes", [`Calling ${em.relative.name} now. I'll text you what I find.`]);
+    await textProtected(em, "call-yes", [`Calling ${relLabel(em)} now. I'll text you what I find.`]);
     await startCall(em);
   } else {
     em.stage = "closed";
@@ -219,17 +267,24 @@ export async function onVerificationResult(r: {
   status: VerifyStatus;
   decidedBy: string;
 }): Promise<void> {
-  const circle = await one<{ protected_user_id: string }>("SELECT protected_user_id FROM circles WHERE id = $1", [r.circleId]);
-  if (!circle) return;
-  let em = activeEmergency(circle.protected_user_id);
+  // Whose emergency this was: the verification's target (any family member), else a legacy circle's protected user.
+  const row = await one<{ target: string | null; organizer: string | null }>(
+    `SELECT COALESCE(v.target_user_id, c.protected_user_id) AS target, c.organizer_user_id AS organizer
+       FROM circles c LEFT JOIN verifications v ON v.id = $2 WHERE c.id = $1`,
+    [r.circleId, r.verificationId],
+  );
+  if (!row?.target) return;
+  let em = activeEmergency(row.target);
+  // A call that fails at once finalizes before startCall has stored the verification id: that's still ours.
   if (em && em.verificationId && em.verificationId !== r.verificationId) em = null;
   if (!em) {
     // Server restarted mid-call (or an old call finished): rebuild what the texts need from the database.
     em = {
       id: randomUUID().slice(0, 12),
-      userId: circle.protected_user_id,
+      userId: row.target,
       circleId: r.circleId,
-      protectedName: await loadProtectedName(circle.protected_user_id),
+      organizerId: row.organizer,
+      protectedName: await loadProtectedName(row.target),
       relative: await getMember(r.relativeId),
       source: "text",
       startedAt: Date.now(),
@@ -244,8 +299,8 @@ export async function onVerificationResult(r: {
   em.outcome = r.status;
   em.decidedBy = r.decidedBy;
 
-  const name = em.relative?.name ?? "your family member";
-  const p = pronouns(em.relative?.relationship);
+  const name = relLabel(em);
+  const p = memberPronouns(em.relative);
   const result: Record<VerifyStatus, string> = {
     verified_safe: `${name} just answered ${p.his} own phone and said the family word. ${cap(p.heIs)} safe. The call you're on is a scam: hang up.`,
     verified_needs_help: `${name} answered and gave the family word, but says ${p.he} ${p.needs} help. Call ${p.him} back on ${p.his} own number, or 911 in an emergency.`,
@@ -278,49 +333,52 @@ registerPendingHandler("loss_question", async (userId, data, answer) => {
   if (!em.alertSent) {
     await sendCircleAlert(em);
   } else {
-    if (answer === "no") await alertGuardians(em, [`Update: ${em.protectedName} says no money was sent.`], "update");
+    if (answer === "no") await alertFamily(em, [`Update: ${em.protectedName} says no money was sent.`], "update");
     if (em.eventId) await query("UPDATE events SET flags = $2 WHERE id = $1", [em.eventId, eventFlags(em)]);
   }
   return true;
 });
 
-/** Step 11: type and outcome only. "No money was sent." only after an explicit NO. */
+/** Step 11: type and outcome only, to everyone with family alerts on. "No money was sent." only after an explicit NO. */
 async function sendCircleAlert(em: Emergency) {
   if (em.alertSent) return;
   em.alertSent = true;
   clearTimeout(em.alertTimer);
-  const name = em.relative?.name ?? "their family member";
-  const p = pronouns(em.relative?.relationship);
+  const p = memberPronouns(em.relative);
   const P = em.protectedName;
-  const line: Record<VerifyStatus, string> = {
-    verified_safe: `${P} received a likely family-emergency scam. ${name} is safe.`,
-    verified_needs_help: `${P} got a family-emergency call. ${name} gave the family word and says ${p.he} ${p.needs} help. Please check on ${p.him}.`,
-    failed: `${P} received a likely family-emergency scam. I couldn't confirm ${name} is safe. Please check on ${p.him}.`,
-    unreachable: `${P} received a likely family-emergency scam. I couldn't reach ${name}. Please check on ${p.him}.`,
-  };
   const outcome = (em.outcome ?? "unreachable") as VerifyStatus;
-  const text = (line[outcome] ?? line.unreachable) + (em.loss === "no" ? " No money was sent." : "");
-  const count = await alertGuardians(em, [text], "alert");
+  const count = await alertFamily(
+    em,
+    (viewerIsOrganizer) => {
+      const name = em.relative ? labelFor(em.relative, viewerIsOrganizer) : "their family member";
+      const line: Record<VerifyStatus, string> = {
+        verified_safe: `${P} received a likely family-emergency scam. ${name} is safe.`,
+        verified_needs_help: `${P} got a family-emergency call. ${name} gave the family word and says ${p.he} ${p.needs} help. Please check on ${p.him}.`,
+        failed: `${P} received a likely family-emergency scam. I couldn't confirm ${name} is safe. Please check on ${p.him}.`,
+        unreachable: `${P} received a likely family-emergency scam. I couldn't reach ${name}. Please check on ${p.him}.`,
+      };
+      return [(line[outcome] ?? line.unreachable) + (em.loss === "no" ? " No money was sent." : "")];
+    },
+    "alert",
+  );
   em.stage = "closed";
   await logEvent(em, count);
 }
 
-async function alertGuardians(em: Emergency, lines: string[], tag: string): Promise<number> {
+/** Texts every family member who turned family alerts on (never the targeted person). */
+async function alertFamily(em: Emergency, lines: string[] | ((viewerIsOrganizer: boolean) => string[]), tag: string): Promise<number> {
   if (!em.circleId) return 0;
-  const guardians = await getJoinedMembers(em.circleId, "guardian");
+  const recipients = await getAlertRecipients(em.circleId, em.userId);
   let sent = 0;
-  for (const g of guardians) {
-    if (!g.user_id) {
-      console.warn(`[family] guardian ${short(g.id)} has no Bouncer account yet; alert not sent`);
-      continue;
-    }
-    const ok = await textUser(g.user_id, lines, `family:${em.id}:${tag}:${short(g.id)}`).catch((err) => {
-      console.error(`[family] alert to guardian ${short(g.id)} failed: ${err?.message}`);
+  for (const g of recipients) {
+    const text = typeof lines === "function" ? lines(g.user_id === em.organizerId) : lines;
+    const ok = await textUser(g.user_id!, text, `family:${em.id}:${tag}:${short(g.id)}`).catch((err) => {
+      console.error(`[family] alert to member ${short(g.id)} failed: ${err?.message}`);
       return false;
     });
     if (ok) sent++;
   }
-  console.log(`[family] circle ${tag}: ${sent}/${guardians.length} guardians texted`);
+  console.log(`[family] circle ${tag}: ${sent}/${recipients.length} family members texted`);
   return sent;
 }
 
@@ -392,7 +450,7 @@ export async function handleFamilyTextImpl(user: User, msg: InboundMessage): Pro
 
   const reply = (tag: string, text: string) =>
     sendText({ spaceId: msg.spaceId, senderId: msg.agentUserId, text, idempotencyKey: `family:${em.id}:${tag}:${msg.id}` });
-  const p = pronouns(em.relative?.relationship);
+  const p = memberPronouns(em.relative);
 
   if (intent === "ask_word") {
     // Text only, and only to the protected person in their own one-to-one thread (never voice, never a group).

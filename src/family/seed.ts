@@ -7,12 +7,18 @@ import { encryptWord, normalizeWord } from "./crypto.js";
 
 export interface SeedMember {
   name: string;
+  /** What the protected person (the organizer of a seeded circle) calls them: "Grandson", "Mom". */
+  title?: string;
+  /** Legacy: used as the title when no title is given. */
   relationship?: string;
-  /** Number Bouncer calls for verification (relatives). */
+  /** Number Bouncer calls for verification. */
   phone?: string;
-  /** iMessage handle Bouncer texts alerts to (guardians). Defaults to the phone. */
+  /** iMessage handle Bouncer texts alerts to. Defaults to the phone. */
   handle?: string;
-  role: "guardian" | "relative";
+  /** Family alerts on for this person. Defaults to true for the legacy role "guardian". */
+  alerts?: boolean;
+  /** Legacy: "guardian" = alerts on; "relative" = alerts off. Everyone with a phone can be called. */
+  role?: "guardian" | "relative";
 }
 
 export interface SeedInput {
@@ -25,7 +31,7 @@ export interface SeedSummary {
   protectedUserId: string;
   people: Array<{
     name: string;
-    role: "protected" | "guardian" | "relative";
+    role: "protected" | "alerts" | "family";
     memberId: string | null;
     userId: string | null;
     hasThread: boolean;
@@ -33,6 +39,9 @@ export interface SeedSummary {
   }>;
   warnings: string[];
 }
+
+const wantsAlerts = (m: SeedMember) => m.alerts ?? m.role === "guardian";
+const capWord = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Phone handles → E.164 so they match what Photon sends; Apple ID emails are kept as typed. */
 export const normalizeHandle = (h: string) => toE164(h) ?? h.trim();
@@ -70,12 +79,11 @@ export async function seedCircle(input: SeedInput, safeWord: string): Promise<Se
   if (!normalizeWord(safeWord)) throw new Error("The safe word is empty.");
   for (const m of input.members) {
     if (!m.name?.trim()) throw new Error("Every member needs a name.");
-    if (m.role !== "guardian" && m.role !== "relative") throw new Error(`Member ${m.name}: role must be guardian or relative.`);
-    if (m.role === "relative" && !m.phone) throw new Error(`Relative ${m.name} needs a phone number (Bouncer calls it).`);
-    if (m.role === "guardian" && !m.handle && !m.phone) throw new Error(`Guardian ${m.name} needs an iMessage handle or phone.`);
+    if (m.role && m.role !== "guardian" && m.role !== "relative") throw new Error(`Member ${m.name}: role must be guardian or relative.`);
+    if (!m.handle && !m.phone) throw new Error(`${m.name} needs a phone number or iMessage handle.`);
   }
-  if (!input.members.some((m) => m.role === "relative")) warnings.push("No relative in the circle: Bouncer will coach but can't make a verification call.");
-  if (!input.members.some((m) => m.role === "guardian")) warnings.push("No guardian in the circle: nobody will get the circle alert.");
+  if (!input.members.some((m) => m.phone)) warnings.push("Nobody in the circle has a phone: Bouncer will coach but can't make a verification call.");
+  if (!input.members.some(wantsAlerts)) warnings.push("Nobody has family alerts on: nobody will get the circle alert.");
   if (normalizeWord(safeWord).replace(/ /g, "").length < 4) warnings.push("The safe word is very short; a longer word or short phrase is harder to guess.");
 
   const db = await pool.connect();
@@ -85,7 +93,7 @@ export async function seedCircle(input: SeedInput, safeWord: string): Promise<Se
     const pu = await upsertUser(db, protectedHandle, input.protected.name.trim());
 
     // Replace any existing circle for this person (members, safe word and verifications cascade).
-    await db.query("DELETE FROM circles WHERE protected_user_id = $1", [pu.id]);
+    await db.query("DELETE FROM circles WHERE protected_user_id = $1 OR organizer_user_id = $1", [pu.id]);
 
     const people: SeedSummary["people"] = [
       { name: input.protected.name.trim(), role: "protected", memberId: null, userId: pu.id, hasThread: !!(pu.space_id && pu.photon_sender_id), phoneLast4: last4(protectedHandle) },
@@ -96,23 +104,44 @@ export async function seedCircle(input: SeedInput, safeWord: string): Promise<Se
       const handle = raw ? normalizeHandle(raw) : null;
       memberUsers.push({ m, handle, user: handle ? await upsertUser(db, handle, m.name.trim()) : null });
     }
-    const organizer = memberUsers.find((x) => x.m.role === "guardian" && x.user)?.user?.id ?? pu.id;
+    // The protected person organizes a seeded circle, so titles are theirs ("Grandson", "Mom"). Everyone
+    // in it is protected, the protected person included (a member row, so others' emergencies can call them).
     const circle = (
-      await db.query("INSERT INTO circles (organizer_user_id, protected_user_id) VALUES ($1, $2) RETURNING id", [organizer, pu.id])
+      await db.query("INSERT INTO circles (organizer_user_id, protected_user_id) VALUES ($1, $1) RETURNING id", [pu.id])
     ).rows[0] as { id: string };
+    const selfPhone = toE164(protectedHandle);
+    people[0].memberId = (
+      await db.query(
+        `INSERT INTO circle_members (circle_id, user_id, name, phone, imessage_handle, role, joined, space_id)
+         VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING id`,
+        [circle.id, pu.id, input.protected.name.trim(), selfPhone, protectedHandle, "relative", pu.space_id],
+      )
+    ).rows[0].id;
 
     for (const { m, handle, user } of memberUsers) {
       const phone = m.phone ? normalizeHandle(m.phone) : null;
+      const title = m.title?.trim() || (m.relationship?.trim() ? capWord(m.relationship.trim()) : null);
       const row = (
         await db.query(
-          `INSERT INTO circle_members (circle_id, user_id, name, relationship, phone, imessage_handle, role, joined, space_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8) RETURNING id`,
-          [circle.id, user?.id ?? null, m.name.trim(), m.relationship?.trim() || null, phone, handle, m.role, user?.space_id ?? null],
+          `INSERT INTO circle_members (circle_id, user_id, name, title, relationship, phone, imessage_handle, role, joined, space_id, alerts)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10) RETURNING id`,
+          [
+            circle.id,
+            user?.id ?? null,
+            m.name.trim(),
+            title,
+            m.relationship?.trim() || null,
+            phone,
+            handle,
+            "relative", // new model: one row per person; anyone with a phone can be called
+            user?.space_id ?? null,
+            wantsAlerts(m),
+          ],
         )
       ).rows[0] as { id: string };
       people.push({
         name: m.name.trim(),
-        role: m.role,
+        role: wantsAlerts(m) ? "alerts" : "family",
         memberId: row.id,
         userId: user?.id ?? null,
         hasThread: !!(user?.space_id && user?.photon_sender_id),
@@ -129,7 +158,7 @@ export async function seedCircle(input: SeedInput, safeWord: string): Promise<Se
     await db.query("COMMIT");
 
     for (const p of people) {
-      if (!p.hasThread && p.role !== "relative") {
+      if (!p.hasThread && p.role !== "family") {
         warnings.push(`${p.name} (${p.role}) hasn't texted Bouncer yet. The shared line can't text first, so ask them to text "hi" to Bouncer once before the demo.`);
       }
     }

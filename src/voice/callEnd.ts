@@ -11,6 +11,7 @@ import { atLeast } from "../detection/risk.js";
 import { openCase, detectPayment, detectAmounts, setCaseContact, type CaseFile } from "../messages/case.js";
 import { findOfficialContact, contactLine } from "../contacts/index.js";
 import { addBouncerTurn } from "../messages/history.js";
+import { notifyFamily } from "../family/alerts.js";
 
 /** Fields we read from the webhook body. Shapes per https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks */
 export interface PostCallEvent {
@@ -109,6 +110,8 @@ async function finishListenCall(
     alertCount: s.alertCount,
     durationS,
   });
+  // Family alerts (opt-in, whole family): type and level only, in the background.
+  void notifyFamily({ userId: s.userId, level: s.level, scamType: s.scamType, source: "call" });
 
   const u = await getUserById(s.userId);
   if (!u?.space_id || !u.photon_sender_id) {

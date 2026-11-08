@@ -8,6 +8,7 @@ import { MESSAGE_QUESTIONS } from "../detection/questions.js";
 import { scoreAnswers } from "../detection/scan.js";
 import { atLeast, LEVEL_LABEL, type RiskLevel } from "../detection/risk.js";
 import { getUserByVoicePhone, textUser, toE164 } from "../users.js";
+import { notifyFamily } from "../family/alerts.js";
 
 export interface CarrierEvent {
   event_id: string;
@@ -161,7 +162,9 @@ async function alertRecipient(ev: CarrierEvent, v: CarrierVerdict): Promise<Aler
   const what = kind ? `a ${kind} scam` : "a scam";
   const text = `⚠️ A text to your phone from ${maskNumber(ev.from)} looks like ${what}. Don't tap its link.`;
   try {
-    return (await textUser(user.id, [text], `bouncer:carrier:${ev.event_id}`)) ? "sent" : "no_thread";
+    const sent = await textUser(user.id, [text], `bouncer:carrier:${ev.event_id}`);
+    if (sent) void notifyFamily({ userId: user.id, level: v.level, scamType: v.scam_type, source: "text" });
+    return sent ? "sent" : "no_thread";
   } catch (err: any) {
     console.error(`[carrier] alert failed: ${err?.message}`);
     return "failed";

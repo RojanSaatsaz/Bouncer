@@ -116,6 +116,14 @@ CREATE TABLE IF NOT EXISTS eval_results (
 -- Our agent's Photon user id on the line (incoming receivedBy.id): the senderId for alerts into space_id.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS photon_sender_id text;
 
+-- Family rework (Nov 8): everyone in a circle is protected. title = what the organizer calls the
+-- person ("Mom", "Grandma"); alerts = this person opted in to instant scam alerts for the whole family.
+-- New rows are one per person with role 'relative' (callable); old 'guardian' rows still get alerts.
+ALTER TABLE circle_members ADD COLUMN IF NOT EXISTS title text;
+ALTER TABLE circle_members ADD COLUMN IF NOT EXISTS alerts boolean NOT NULL DEFAULT false;
+-- Who the verification call was for (any family member can be the target now, not only protected_user_id).
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS target_user_id uuid REFERENCES users(id) ON DELETE SET NULL;
+
 -- ===== Flow 5 (reports / patterns) tables go here =====
 -- Anonymised scam templates ({NAME}, {PHONE}, {AMOUNT}, {DATE}, {LINK}, {CODE}). No user id, no raw text.
 -- embedding: Gemini embedding of the template as real[] (no pgvector); NULL when embedding failed.

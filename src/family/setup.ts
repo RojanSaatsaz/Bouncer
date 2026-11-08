@@ -1,5 +1,8 @@
-// SPEC Flow 3 Setup steps 1–3 by text: build a family circle one question at a time, JOIN codes with a
-// YES to consent, and the safe word (encrypted at once, never echoed, logged or kept in memory).
+// SPEC Flow 3 Setup by text (reworked Nov 8): the organizer builds their family one question at a time.
+// Everyone in the family is protected; each person gets a title the organizer picks ("Mom", "Grandma")
+// so "Mom is in trouble" finds the right person. Instead of per-member roles, each person makes one
+// choice: instant scam alerts for the whole family, on or off (FAMILY ALERTS ON / OFF changes it).
+// JOIN codes with a YES to consent; the safe word is encrypted at once, never echoed, logged or kept.
 // The conversation draft lives in memory only (30 min). Logs carry ids and step names, never names,
 // numbers or the word. Seeded circles (scripts/seed-family.ts) need none of this and keep working.
 import { randomInt } from "node:crypto";
@@ -8,41 +11,30 @@ import { one, pool, query } from "../db.js";
 import type { InboundMessage } from "../photon/socket.js";
 import { sendLines } from "../photon/client.js";
 import { registerPendingHandler, setPending } from "../pending.js";
-import { getUserByHandle, getUserByVoicePhone, textUser, toE164, type User } from "../users.js";
-import { getCircleForProtected, protectedName } from "./circle.js";
+import { textUser, toE164, type User } from "../users.js";
+import { getCircleForUser } from "./circle.js";
 import { encryptWord, normalizeWord } from "./crypto.js";
-import { normalizeHandle, upsertUser } from "./seed.js";
+import { normalizeHandle } from "./seed.js";
 
 type Reply = (lines: string[]) => Promise<void>;
-type Role = "guardian" | "relative";
-type Step =
-  | "organizer_name"
-  | "protected_name"
-  | "protected_phone"
-  | "member_name"
-  | "member_relationship"
-  | "member_phone"
-  | "member_role"
-  | "safe_word";
+type Step = "organizer_name" | "member_title" | "member_name" | "member_phone" | "alerts" | "safe_word";
 
 interface DraftMember {
+  title: string;
   name: string;
-  relationship: string;
   phone: string; // E.164
-  roles: Role[];
 }
 
 interface Draft {
   step: Step;
   expiresAt: number;
   organizerName?: string;
-  protectedName?: string;
-  /** E.164 / Apple ID of the protected person; null = the organizer is protecting themselves ("me"). */
-  protectedHandle?: string | null;
   members: DraftMember[];
   cur: Partial<DraftMember>;
-  /** safe_word step: the circle the next text is the word for. */
+  /** alerts / safe_word steps: the circle they are for. */
   circleId?: string;
+  /** alerts step: the organizer's own member row. */
+  selfMemberId?: string;
 }
 
 const TTL_MS = 30 * 60_000;
@@ -52,6 +44,8 @@ const short = (id: string) => id.slice(0, 8);
 const SAVED = "Saved and encrypted. I'll never say it on a call. You can delete your message now.";
 const ASK_WORD =
   "Pick a word or short phrase you'd never say by accident and tell your family in person. Then text it to me here.";
+const ASK_ALERTS = "Want an instant text if anyone in your family is targeted by a scam? Reply YES or NO.";
+const ALERTS_HELP = "Text FAMILY ALERTS ON or OFF any time to change it.";
 
 /** Lowercase, apostrophes dropped, other punctuation → spaces. For matching commands only. */
 const norm = (s: string) =>
@@ -66,14 +60,16 @@ const norm = (s: string) =>
 const START_RE = /^(please )?(set ?up|start|create|make) (a |my |our |the )?family( circle)?$|^family (circle )?set ?up$|^add (my )?family( members?)?$/;
 const WORD_RE = /^(please )?(change|new|reset|update|set|set ?up) (my |the |our |a )?(family safe|family|safe) (word|phrase)$/;
 const JOIN_RE = /^join ([a-z0-9]{6})$/;
+const ALERTS_RE = /^(?:turn )?(?:family |scam )?alerts? (on|off)$|^turn (on|off) (?:my )?(?:family |scam )?alerts?$|^(?:family |scam )?alerts? (?:to )?(on|off)$/;
 const CANCEL_RE = /^(cancel|stop|quit|exit|never ?mind)( setup)?$/;
 const DONE_RE = /^(done|im done|finished|thats all|thats it|thats everyone|no more|no one else|nobody else)$/;
-const ME_RE = /^(me|myself|its me|for me|me please)$/;
+const YES_RE = /^(yes|y|yeah|yep|yup|sure|ok|okay|please|yes please|on|turn (it )?on)$/;
+const NO_RE = /^(no|n|nope|nah|no thanks|off|keep (them|it) off|not now)$/;
 
 /** True for texts setup handles even from a brand-new user (so the router doesn't stop at the welcome). */
 export function isSetupCommand(text: string | null | undefined): boolean {
   const t = norm(text ?? "");
-  return START_RE.test(t) || WORD_RE.test(t) || JOIN_RE.test(t);
+  return START_RE.test(t) || WORD_RE.test(t) || JOIN_RE.test(t) || ALERTS_RE.test(t);
 }
 
 function getDraft(userId: string): Draft | null {
@@ -99,123 +95,80 @@ function cleanName(raw: string): string | null {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function cleanRelationship(raw: string): string | null {
-  const s = raw.replace(/[^\p{L}' -]/gu, " ").replace(/\s+/g, " ").trim().toLowerCase();
-  return s && s.length <= 30 && s.split(" ").length <= 4 ? s : null;
+/** "my mom" → "Mom". What the organizer calls this person; any word works ("Nana", "Bae", "Tío"). */
+function cleanTitle(raw: string): string | null {
+  return cleanName(raw.replace(/^\s*(my|our)\s+/i, ""));
 }
-
-const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-
-function parseRole(raw: string): Role[] | null {
-  const t = norm(raw);
-  if (/\b(both|all|either)\b/.test(t)) return ["guardian", "relative"];
-  if (/\b(alerts?|guardian|texts?)\b/.test(t)) return ["guardian"];
-  if (/\b(call|calls|relative|check)\b/.test(t)) return ["relative"];
-  return null;
-}
-
-const pName = (d: Draft) => d.protectedName ?? "them";
 
 function question(d: Draft): string {
-  const P = pName(d);
-  const name = d.cur.name ?? "they";
+  const title = d.cur.title ?? "they";
   switch (d.step) {
     case "organizer_name":
       return "First, what's your first name?";
-    case "protected_name":
-      return "Who should I protect? Text their name, like Grandma, or ME if it's you.";
-    case "protected_phone":
-      return `What's ${P}'s cell number? It should be the phone ${P} texts me from.`;
-    case "member_name":
+    case "member_title":
       return d.members.length
-        ? "Who's next? Text their name, or DONE if that's everyone."
-        : "Now add family. What's the first person's name?";
-    case "member_relationship":
-      return `How is ${name} related to ${d.protectedHandle === null ? "you" : P}? For example: grandson or daughter.`;
+        ? "Who's next? Text what you call them, or DONE if that's everyone."
+        : "Now add your family. Who's first? Text what you call them, like Mom or Grandma.";
+    case "member_name":
+      return `What's ${title}'s first name?`;
     case "member_phone":
-      return `What's ${name}'s cell number?`;
-    case "member_role":
-      return (
-        `What should ${name} do? Reply ALERTS (gets a text if someone targets ${d.protectedHandle === null ? "you" : P}), ` +
-        `CALL (I may call ${name} to check they're safe), or BOTH.`
-      );
+      return `What's ${title}'s cell number?`;
+    case "alerts":
+      return ASK_ALERTS;
     case "safe_word":
       return ASK_WORD;
   }
 }
 
-/** Finds the protected person's user row by handle, or by voice phone for someone who only called. */
-async function findUser(handle: string): Promise<User | null> {
-  const byHandle = await getUserByHandle(handle);
-  if (byHandle) return byHandle;
-  const e164 = toE164(handle);
-  return e164 ? getUserByVoicePhone(e164) : null;
-}
-
-const hasThread = (u: { space_id: string | null; photon_sender_id: string | null } | null) => !!(u?.space_id && u.photon_sender_id);
-
-/** Only the circle's organizer, or the protected person themselves, may replace an existing circle. */
-async function mayReplace(protectedUserId: string, organizerId: string): Promise<boolean> {
-  if (protectedUserId === organizerId) return true;
-  const c = await getCircleForProtected(protectedUserId);
-  return !c || c.organizer_user_id === organizerId;
-}
-
-function threadWarning(P: string): string {
-  return (
-    `Heads up: ${P} hasn't texted me yet, so I can't reach them in an emergency. ` +
-    `Ask ${P} to text "hi" to me at ${config.photon.imessageHandle} once.`
-  );
-}
-
 /** SPEC step 1. Also the entry point for the Jev `setup` intent. */
 export async function startSetup(user: User, reply: Reply): Promise<void> {
   const organizerName = user.name?.trim() || undefined;
-  const d: Draft = { step: organizerName ? "protected_name" : "organizer_name", expiresAt: Date.now() + TTL_MS, organizerName, members: [], cur: {} };
+  const d: Draft = { step: organizerName ? "member_title" : "organizer_name", expiresAt: Date.now() + TTL_MS, organizerName, members: [], cur: {} };
   drafts.set(user.id, d);
-  const lines = ["Let's set up your family circle. I'll ask one thing at a time. Text CANCEL to stop."];
-  const existing = await one<{ protected_user_id: string }>(
-    "SELECT protected_user_id FROM circles WHERE organizer_user_id = $1 ORDER BY created_at DESC LIMIT 1",
-    [user.id],
-  );
+  const lines = ["Let's set up your family circle. I'll protect everyone in it. I'll ask one thing at a time. Text CANCEL to stop."];
+  const existing = await one("SELECT 1 FROM circles WHERE organizer_user_id = $1 LIMIT 1", [user.id]);
   if (existing) {
-    lines.push(
-      `You already have a circle for ${await protectedName(existing.protected_user_id)}. Finishing this replaces it. ` +
-        "To only change the safe word, text CHANGE SAFE WORD.",
-    );
+    lines.push("You already have a family circle. Finishing this replaces it. To only change the safe word, text CHANGE SAFE WORD.");
   }
   lines.push(question(d));
   console.log(`[setup] user ${short(user.id)} started setup`);
   await reply(lines);
 }
 
-/** "change safe word": the organizer (or the protected person) picks a new word for their circle. */
+/** "change safe word": anyone who organized or joined a circle picks a new word for it. */
 export async function startWordChange(user: User, reply: Reply): Promise<void> {
-  const c = await one<{ id: string; protected_user_id: string }>(
-    `SELECT id, protected_user_id FROM circles WHERE organizer_user_id = $1 OR protected_user_id = $1
-     ORDER BY (organizer_user_id = $1) DESC, created_at DESC LIMIT 1`,
-    [user.id],
-  );
+  const c = await getCircleForUser(user.id);
   if (!c) {
     await reply(["You don't have a family circle yet. Text SET UP FAMILY to start one."]);
     return;
   }
   drafts.set(user.id, { step: "safe_word", expiresAt: Date.now() + TTL_MS, members: [], cur: {}, circleId: c.id });
-  const whose = c.protected_user_id === user.id ? "your" : `${await protectedName(c.protected_user_id)}'s`;
-  await reply([`Okay, a new safe word for ${whose} circle. Text CANCEL to keep the old one.`, ASK_WORD]);
+  await reply(["Okay, a new safe word for your family. Text CANCEL to keep the old one.", ASK_WORD]);
+}
+
+/** FAMILY ALERTS ON / OFF: one switch for the whole family, for every circle this person is in. */
+async function setAlerts(user: User, on: boolean, reply: Reply): Promise<void> {
+  const { rowCount } = await query("UPDATE circle_members SET alerts = $2 WHERE user_id = $1 AND joined", [user.id, on]);
+  console.log(`[setup] user ${short(user.id)} family alerts ${on ? "on" : "off"} (${rowCount ?? 0} rows)`);
+  if (!rowCount) return reply(["You're not in a family circle yet. Text SET UP FAMILY to start one."]);
+  return reply([
+    on
+      ? "Family alerts are on. If anyone in your family is targeted by a scam, I'll text you here. I never share their messages."
+      : "Family alerts are off. I'll still protect everyone in your family.",
+  ]);
 }
 
 /**
  * iMessage router hook (after YES/NO and Flow 3 emergency texts, before intent routing).
- * Returns true if setup consumed the text: start / change-word / JOIN commands, and every text while
- * a setup conversation is open (including the safe word, which must never reach Jev or Gemini).
+ * Returns true if setup consumed the text: start / change-word / JOIN / alerts commands, and every text
+ * while a setup conversation is open (including the safe word, which must never reach Jev or Gemini).
  */
 export async function handleSetupText(user: User, msg: InboundMessage): Promise<boolean> {
   const text = msg.text ?? "";
   if (!text.trim() || msg.attachmentIds.length) return false;
   const t = norm(text);
   const reply = replyFor(msg);
-  const command = START_RE.test(t) ? "start" : WORD_RE.test(t) ? "word" : JOIN_RE.test(t) ? "join" : null;
+  const command = START_RE.test(t) ? "start" : WORD_RE.test(t) ? "word" : JOIN_RE.test(t) ? "join" : ALERTS_RE.test(t) ? "alerts" : null;
   const d = getDraft(user.id);
   if (!command && !d) return false;
 
@@ -229,12 +182,22 @@ export async function handleSetupText(user: User, msg: InboundMessage): Promise<
     if (command === "start") return await startSetup(user, reply).then(() => true);
     if (command === "word") return await startWordChange(user, reply).then(() => true);
     if (command === "join") return await handleJoin(user, msg, JOIN_RE.exec(t)![1].toUpperCase(), reply).then(() => true);
+    if (command === "alerts") {
+      const m = ALERTS_RE.exec(t)!;
+      const on = (m[1] ?? m[2] ?? m[3]) === "on";
+      if (d?.step === "alerts") return await answerAlerts(user, d, on, reply).then(() => true);
+      return await setAlerts(user, on, reply).then(() => true);
+    }
 
     if (CANCEL_RE.test(t)) {
       drafts.delete(user.id);
-      await reply([
-        d!.step === "safe_word" ? "Okay, I didn't save a new safe word." : "Okay, I stopped family setup. Text SET UP FAMILY any time to start again.",
-      ]);
+      const line =
+        d!.step === "safe_word"
+          ? "Okay, I didn't save a new safe word."
+          : d!.step === "alerts"
+            ? `Okay, family alerts stay off. ${ALERTS_HELP}`
+            : "Okay, I stopped family setup. Text SET UP FAMILY any time to start again.";
+      await reply([line]);
       return true;
     }
     // A link or a long paste mid-setup is almost surely a message to check, not an answer.
@@ -263,52 +226,28 @@ async function step(user: User, d: Draft, text: string, reply: Reply): Promise<v
       if (!name) return reply(["Just your first name, please."]);
       d.organizerName = name;
       await query("UPDATE users SET name = $2 WHERE id = $1", [user.id, name]);
-      d.step = "protected_name";
+      d.step = "member_title";
       return reply([`Thanks, ${name}.`, question(d)]);
     }
 
-    case "protected_name": {
-      if (ME_RE.test(t)) {
-        d.protectedName = d.organizerName ?? user.name ?? "you";
-        d.protectedHandle = null;
-        return afterProtected(user, d, reply);
+    case "member_title": {
+      if (DONE_RE.test(t)) {
+        if (!d.members.length) return reply(["Add at least one person first. What do you call them? Like Mom or Grandma."]);
+        return createCircle(user, d, reply);
       }
-      const name = cleanName(text);
-      if (!name) return reply(["Just their name, like Grandma or Rosa."]);
-      d.protectedName = name;
-      d.step = "protected_phone";
+      const title = cleanTitle(text);
+      if (!title) return reply(["Just what you call them, like Mom, Grandma or Uncle Joe. Or text DONE if that's everyone."]);
+      const dup = d.members.find((m) => m.title.toLowerCase() === title.toLowerCase());
+      if (dup) return reply([`You already added ${dup.title} (${dup.name}). Pick a different name for this person, like Grandma Rosa.`]);
+      d.cur = { title };
+      d.step = "member_name";
       return reply([question(d)]);
-    }
-
-    case "protected_phone": {
-      const own = user.imessage_handle ? normalizeHandle(user.imessage_handle) : null;
-      let handle: string | null;
-      if (ME_RE.test(t)) handle = null;
-      else {
-        handle = toE164(text) ?? (isEmail(text) ? text.trim().toLowerCase() : null);
-        if (!handle) return reply(["That doesn't look like a phone number. Text it like 214-555-0100."]);
-        if (handle === own) handle = null;
-      }
-      d.protectedHandle = handle;
-      return afterProtected(user, d, reply);
     }
 
     case "member_name": {
-      if (DONE_RE.test(t)) {
-        if (!d.members.length) return reply(["Add at least one person first. What's their name?"]);
-        return createCircle(user, d, reply);
-      }
       const name = cleanName(text);
-      if (!name) return reply(["Just their name, please. Or text DONE if that's everyone."]);
-      d.cur = { name };
-      d.step = "member_relationship";
-      return reply([question(d)]);
-    }
-
-    case "member_relationship": {
-      const rel = cleanRelationship(text);
-      if (!rel) return reply(["A word or two is fine, like grandson, daughter or friend."]);
-      d.cur.relationship = rel;
+      if (!name) return reply([`Just ${d.cur.title}'s first name, please.`]);
+      d.cur.name = name;
       d.step = "member_phone";
       return reply([question(d)]);
     }
@@ -316,23 +255,21 @@ async function step(user: User, d: Draft, text: string, reply: Reply): Promise<v
     case "member_phone": {
       const phone = toE164(text);
       if (!phone) return reply(["That doesn't look like a phone number. Text it like 214-555-0100."]);
-      const protectedHandle = d.protectedHandle ?? (user.imessage_handle ? normalizeHandle(user.imessage_handle) : null);
-      if (phone === protectedHandle) return reply([`That's ${d.protectedHandle === null ? "your" : `${pName(d)}'s`} number. What's ${d.cur.name}'s own number?`]);
+      const own = user.imessage_handle ? normalizeHandle(user.imessage_handle) : null;
+      if (phone === own || phone === user.voice_phone) return reply([`That's your number. What's ${d.cur.title}'s own number?`]);
       const dup = d.members.find((m) => m.phone === phone);
-      if (dup) return reply([`${dup.name} already has that number. What's ${d.cur.name}'s number?`]);
-      d.cur.phone = phone;
-      d.step = "member_role";
-      return reply([question(d)]);
+      if (dup) return reply([`${dup.title} already has that number. What's ${d.cur.title}'s number?`]);
+      d.members.push({ title: d.cur.title!, name: d.cur.name!, phone });
+      const added = d.cur.name!.toLowerCase() === d.cur.title!.toLowerCase() ? d.cur.title! : `${d.cur.title} (${d.cur.name})`;
+      d.cur = {};
+      d.step = "member_title";
+      return reply([`Added ${added}.`, question(d)]);
     }
 
-    case "member_role": {
-      const roles = parseRole(text);
-      if (!roles) return reply([`Reply ALERTS, CALL or BOTH for ${d.cur.name}.`]);
-      d.members.push({ name: d.cur.name!, relationship: d.cur.relationship!, phone: d.cur.phone!, roles });
-      const added = d.cur.name!;
-      d.cur = {};
-      d.step = "member_name";
-      return reply([`Added ${added}.`, question(d)]);
+    case "alerts": {
+      const on = YES_RE.test(t) ? true : NO_RE.test(t) ? false : null;
+      if (on === null) return reply(["Reply YES for instant family scam alerts, or NO to keep them off."]);
+      return answerAlerts(user, d, on, reply);
     }
 
     case "safe_word":
@@ -340,66 +277,48 @@ async function step(user: User, d: Draft, text: string, reply: Reply): Promise<v
   }
 }
 
-/** After the protected person is known: refuse someone else's circle, warn if they've never texted. */
-async function afterProtected(user: User, d: Draft, reply: Reply): Promise<void> {
-  const P = pName(d);
-  const pu = d.protectedHandle === null ? user : await findUser(d.protectedHandle!);
-  if (pu && !(await mayReplace(pu.id, user.id))) {
-    drafts.delete(user.id);
-    return reply([`${P} already has a family circle. Only the person who set it up can change it.`]);
-  }
-  d.step = "member_name";
-  const lines: string[] = [];
-  if (d.protectedHandle !== null && !hasThread(pu)) lines.push(threadWarning(P));
-  lines.push(question(d));
-  return reply(lines);
-}
-
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0, I/1
 const newCode = () => Array.from({ length: 6 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join("");
 
-/** SPEC step 2: circle + members (not joined yet) + a 6-character join code. */
+/**
+ * SPEC step 2: circle + the organizer (joined at once) + members (not joined yet) + a 6-character join code.
+ * One row per person, role 'relative' (Bouncer may call them to check they're safe).
+ */
 async function createCircle(user: User, d: Draft, reply: Reply): Promise<void> {
   const own = user.imessage_handle ? normalizeHandle(user.imessage_handle) : null;
+  const ownPhone = (own && toE164(own)) || user.voice_phone || null;
   const db = await pool.connect();
-  let circleId: string, code: string, protectedUser: { id: string; space_id: string | null; photon_sender_id: string | null };
-  let organizerListed = false;
+  let circleId: string, code: string, selfId: string;
   try {
     await db.query("BEGIN");
-    protectedUser = d.protectedHandle === null ? user : await upsertUser(db, d.protectedHandle!, d.protectedName!);
-    const other = (
-      await db.query("SELECT 1 FROM circles WHERE protected_user_id = $1 AND organizer_user_id IS DISTINCT FROM $2", [protectedUser.id, user.id])
-    ).rowCount;
-    if (other && protectedUser.id !== user.id) {
-      await db.query("ROLLBACK");
-      drafts.delete(user.id);
-      return reply([`${pName(d)} already has a family circle. Only the person who set it up can change it.`]);
-    }
-    // Replace this person's old circle (members, safe word and verifications cascade).
-    await db.query("DELETE FROM circles WHERE protected_user_id = $1", [protectedUser.id]);
+    // Replace this organizer's old circle (members, safe word and verifications cascade).
+    await db.query("DELETE FROM circles WHERE organizer_user_id = $1", [user.id]);
     let row: { id: string } | undefined;
     for (let i = 0; i < 5 && !row; i++) {
       code = newCode();
       row = (
         await db.query(
-          "INSERT INTO circles (organizer_user_id, protected_user_id, join_code) VALUES ($1, $2, $3) ON CONFLICT (join_code) DO NOTHING RETURNING id",
-          [user.id, protectedUser.id, code],
+          "INSERT INTO circles (organizer_user_id, protected_user_id, join_code) VALUES ($1, $1, $2) ON CONFLICT (join_code) DO NOTHING RETURNING id",
+          [user.id, code],
         )
       ).rows[0];
     }
     if (!row) throw new Error("no free join code");
     circleId = row.id;
+    // The organizer is family too: protected, and callable when someone pretends to be them.
+    selfId = (
+      await db.query(
+        `INSERT INTO circle_members (circle_id, user_id, name, title, phone, imessage_handle, role, joined, space_id)
+         VALUES ($1, $2, $3, NULL, $4, $5, 'relative', true, $6) RETURNING id`,
+        [circleId, user.id, d.organizerName ?? user.name ?? "Me", ownPhone, own, user.space_id],
+      )
+    ).rows[0].id;
     for (const m of d.members) {
-      // The organizer listing themselves has already agreed by setting this up: joined right away.
-      const self = m.phone === own;
-      if (self) organizerListed = true;
-      for (const role of m.roles) {
-        await db.query(
-          `INSERT INTO circle_members (circle_id, user_id, name, relationship, phone, imessage_handle, role, joined, space_id)
-           VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)`,
-          [circleId, self ? user.id : null, m.name, m.relationship, m.phone, role, self, self ? user.space_id : null],
-        );
-      }
+      await db.query(
+        `INSERT INTO circle_members (circle_id, name, title, phone, imessage_handle, role, joined)
+         VALUES ($1, $2, $3, $4, $4, 'relative', false)`,
+        [circleId, m.name, m.title, m.phone],
+      );
     }
     await db.query("COMMIT");
   } catch (err) {
@@ -409,20 +328,25 @@ async function createCircle(user: User, d: Draft, reply: Reply): Promise<void> {
     db.release();
   }
 
-  d.step = "safe_word";
+  d.step = "alerts";
   d.circleId = circleId;
+  d.selfMemberId = selfId;
   console.log(`[setup] user ${short(user.id)} created circle ${short(circleId)} (${d.members.length} members)`);
-  const others = d.members.filter((m) => m.phone !== own).length;
-  const lines = [
-    others
-      ? `Your circle is ready. Send each family member this: "Text JOIN ${code!} to Bouncer at ${config.photon.imessageHandle}". ` +
-        "Nobody gets alerts or calls until they reply YES."
-      : "Your circle is ready.",
-  ];
-  if (organizerListed) lines[0] += " You're already in.";
-  if (d.protectedHandle !== null && !hasThread(protectedUser!)) lines.push(threadWarning(pName(d)));
-  lines.push(`Last step: the family safe word. ${ASK_WORD}`);
-  return reply(lines);
+  return reply([
+    `Your family circle is ready. Send each person this: "Text JOIN ${code!} to Bouncer at ${config.photon.imessageHandle}". ` +
+      "I'll protect each of them once they reply YES.",
+    ASK_ALERTS,
+  ]);
+}
+
+async function answerAlerts(user: User, d: Draft, on: boolean, reply: Reply): Promise<void> {
+  await query("UPDATE circle_members SET alerts = $2 WHERE id = $1", [d.selfMemberId, on]);
+  console.log(`[setup] user ${short(user.id)} family alerts ${on ? "on" : "off"} at setup`);
+  d.step = "safe_word";
+  return reply([
+    on ? "Family alerts are on." : "Okay, family alerts are off.",
+    `${ALERTS_HELP} Last step: the family safe word. ${ASK_WORD}`,
+  ]);
 }
 
 /** SPEC step 3. The text is normalised + encrypted immediately and never echoed, logged or kept. */
@@ -430,11 +354,12 @@ async function saveWord(user: User, d: Draft, text: string, reply: Reply): Promi
   const words = normalizeWord(text).split(" ").filter(Boolean);
   if (!words.length) return reply(["I couldn't read a word there. Text just the word or short phrase."]);
   if (words.length > 6 || words.join(" ").length > 60) return reply(["That's long for a safe word. Pick a word or short phrase, up to 6 words."]);
-  const c = await one<{ organizer_user_id: string | null; protected_user_id: string }>(
-    "SELECT organizer_user_id, protected_user_id FROM circles WHERE id = $1",
-    [d.circleId],
+  const ok = await one(
+    `SELECT 1 FROM circles c WHERE c.id = $1 AND (c.organizer_user_id = $2 OR c.protected_user_id = $2
+       OR EXISTS (SELECT 1 FROM circle_members m WHERE m.circle_id = c.id AND m.user_id = $2 AND m.joined))`,
+    [d.circleId, user.id],
   );
-  if (!c || (c.organizer_user_id !== user.id && c.protected_user_id !== user.id)) {
+  if (!ok) {
     drafts.delete(user.id);
     return reply(["That family circle doesn't exist anymore, so I didn't save anything. Text SET UP FAMILY to start again."]);
   }
@@ -451,12 +376,13 @@ async function saveWord(user: User, d: Draft, text: string, reply: Reply): Promi
   return reply(lines);
 }
 
+const organizerName = async (organizerId: string | null) =>
+  (organizerId ? (await one<{ name: string | null }>("SELECT name FROM users WHERE id = $1", [organizerId]))?.name?.trim() : null) ||
+  "Your family";
+
 /** SPEC step 2, member side: `JOIN ABC123` from a listed number → consent text → YES (pending "circle_join"). */
 async function handleJoin(user: User, msg: InboundMessage, code: string, reply: Reply): Promise<void> {
-  const c = await one<{ id: string; protected_user_id: string; organizer_user_id: string | null }>(
-    "SELECT id, protected_user_id, organizer_user_id FROM circles WHERE join_code = $1",
-    [code],
-  );
+  const c = await one<{ id: string; organizer_user_id: string | null }>("SELECT id, organizer_user_id FROM circles WHERE join_code = $1", [code]);
   if (!c) return reply(["I couldn't find that code. Check it and text JOIN and the code again."]);
   const handle = normalizeHandle(msg.senderHandle);
   const { rows } = await query<{ id: string; joined: boolean }>(
@@ -465,13 +391,12 @@ async function handleJoin(user: User, msg: InboundMessage, code: string, reply: 
   );
   console.log(`[setup] user ${short(user.id)} JOIN for circle ${short(c.id)}: ${rows.length ? "listed" : "not listed"}`);
   if (!rows.length) return reply(["This number isn't on that family list. Ask the person who sent you the code to add it."]);
-  const P = await protectedName(c.protected_user_id);
-  if (rows.every((r) => r.joined)) return reply([`You're already in ${P}'s circle.`]);
-  const org = c.organizer_user_id ? await one<{ name: string | null }>("SELECT name FROM users WHERE id = $1", [c.organizer_user_id]) : null;
+  const org = await organizerName(c.organizer_user_id);
+  if (rows.every((r) => r.joined)) return reply([`You're already in ${org}'s family circle. ${ALERTS_HELP}`]);
   setPending(user.id, "circle_join", { circleId: c.id, memberIds: rows.map((r) => r.id), spaceId: msg.spaceId, senderId: msg.agentUserId });
   return reply([
-    `${org?.name?.trim() || "Your family"} added you to ${P}'s Bouncer circle. You'll get the scam type and outcome if someone targets them, ` +
-      "never their messages. Relatives may get one verification call from Bouncer. Reply YES to join.",
+    `${org} added you to their Bouncer family circle. If someone pretends to be family to scam you, I'll help you check. ` +
+      "I may also call this number once to check you're safe. I never share your messages. Reply YES to join.",
   ]);
 }
 
@@ -479,10 +404,7 @@ registerPendingHandler("circle_join", async (userId, data, answer) => {
   const { circleId, spaceId, senderId } = data as { circleId: string; spaceId: string; senderId: string };
   const memberIds = data.memberIds as string[];
   const say = (lines: string[]) => sendLines({ spaceId, senderId, keyPrefix: `setup:join:${short(userId)}:${Date.now()}` }, lines);
-  const c = await one<{ protected_user_id: string; organizer_user_id: string | null }>(
-    "SELECT protected_user_id, organizer_user_id FROM circles WHERE id = $1",
-    [circleId],
-  );
+  const c = await one<{ organizer_user_id: string | null }>("SELECT organizer_user_id FROM circles WHERE id = $1", [circleId]);
   const { rows: still } = await query<{ id: string }>("SELECT id FROM circle_members WHERE id = ANY($1) AND circle_id = $2", [memberIds, circleId]);
   if (!c || !still.length) {
     await say(["That family invite isn't valid anymore. Ask for a new code."]);
@@ -492,21 +414,31 @@ registerPendingHandler("circle_join", async (userId, data, answer) => {
     await say(["Okay, you're not in the circle. Text JOIN and the code if you change your mind."]);
     return true;
   }
-  const { rows } = await query<{ name: string; role: Role }>(
-    "UPDATE circle_members SET joined = true, user_id = $2, space_id = $3 WHERE id = ANY($1) RETURNING name, role",
+  const { rows } = await query<{ name: string; title: string | null }>(
+    "UPDATE circle_members SET joined = true, user_id = $2, space_id = $3 WHERE id = ANY($1) RETURNING name, title",
     [memberIds, userId, spaceId],
   );
-  console.log(`[setup] user ${short(userId)} joined circle ${short(circleId)} (${rows.map((r) => r.role).join("+")})`);
-  const P = await protectedName(c.protected_user_id);
-  const roles = new Set(rows.map((r) => r.role));
-  const lines = [`You're in ${P}'s circle.`];
-  if (roles.has("guardian")) lines.push(`If someone targets ${P}, I'll text you here with the scam type and outcome.`);
-  if (roles.has("relative")) lines.push(`If someone pretends to be you to ${P}, I may call this number to check you're safe.`);
-  await say([lines.join(" ")]);
+  console.log(`[setup] user ${short(userId)} joined circle ${short(circleId)}`);
+  const org = await organizerName(c.organizer_user_id);
+  // Second question, same YES/NO slot: the whole-family alert switch for this person.
+  setPending(userId, "family_alerts", { memberIds, spaceId, senderId });
+  await say([`You're in ${org}'s family circle. I'm protecting you now.`, ASK_ALERTS]);
   if (c.organizer_user_id && c.organizer_user_id !== userId) {
-    await textUser(c.organizer_user_id, [`${rows[0]?.name ?? "A family member"} joined ${P}'s circle.`], `setup:joined:${short(userId)}:${short(circleId)}`).catch(
-      (err) => console.error(`[setup] organizer notice failed: ${err?.message}`),
+    const who = rows[0]?.title ?? rows[0]?.name ?? "A family member";
+    await textUser(c.organizer_user_id, [`${who} joined your family circle.`], `setup:joined:${short(userId)}:${short(circleId)}`).catch((err) =>
+      console.error(`[setup] organizer notice failed: ${err?.message}`),
     );
   }
+  return true;
+});
+
+registerPendingHandler("family_alerts", async (userId, data, answer) => {
+  const { spaceId, senderId } = data as { spaceId: string; senderId: string };
+  const on = answer === "yes";
+  await query("UPDATE circle_members SET alerts = $2 WHERE id = ANY($1) AND user_id = $3", [data.memberIds as string[], on, userId]);
+  console.log(`[setup] user ${short(userId)} family alerts ${on ? "on" : "off"} at join`);
+  await sendLines({ spaceId, senderId, keyPrefix: `setup:alerts:${short(userId)}:${Date.now()}` }, [
+    `${on ? "Family alerts are on." : "Okay, family alerts are off."} ${ALERTS_HELP}`,
+  ]);
   return true;
 });

@@ -2,8 +2,8 @@
 //
 //   SAFE_WORD='purple elephant' npm run seed:family -- \
 //     --protected "name=Grandma,handle=+12145550100" \
-//     --member "name=Jake,relationship=grandson,phone=+12145550101,role=relative" \
-//     --member "name=Mom,relationship=daughter,phone=+12145550102,role=guardian"
+//     --member "name=Jake,title=Grandson,phone=+12145550101" \
+//     --member "name=Maria,title=Daughter,phone=+12145550102,alerts=yes"
 //
 //   npm run seed:family -- --file circle.json      (JSON: { protected: {name, handle}, members: [...] })
 //
@@ -18,10 +18,12 @@ import { seedCircle, type SeedInput, type SeedMember } from "../src/family/seed.
 
 const USAGE = `Usage:
   SAFE_WORD='…' npm run seed:family -- --protected "name=Grandma,handle=+1214…" \\
-    --member "name=Jake,relationship=grandson,phone=+1214…,role=relative" \\
-    --member "name=Mom,relationship=daughter,phone=+1214…,role=guardian"
+    --member "name=Jake,title=Grandson,phone=+1214…" \\
+    --member "name=Maria,title=Daughter,phone=+1214…,alerts=yes"
   npm run seed:family -- --file circle.json
-Member keys: name, relationship, phone, handle (defaults to phone), role (guardian | relative).`;
+Member keys: name, title (what the protected person calls them), phone, handle (defaults to phone),
+alerts (yes | no: instant scam alerts for the whole family). Everyone is protected and can be called.
+Legacy keys still work: relationship (= title), role=guardian (= alerts=yes).`;
 
 function kv(spec: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -60,7 +62,15 @@ function readInput(): SeedInput {
     protected: { name: p.name, handle: p.handle ?? p.phone },
     members: values.member.map((m) => {
       const f = kv(m);
-      return { name: f.name, relationship: f.relationship, phone: f.phone, handle: f.handle, role: f.role as SeedMember["role"] };
+      return {
+        name: f.name,
+        title: f.title,
+        relationship: f.relationship,
+        phone: f.phone,
+        handle: f.handle,
+        alerts: f.alerts ? /^(y|yes|on|true|1)$/i.test(f.alerts) : undefined,
+        role: f.role as SeedMember["role"],
+      };
     }),
   };
 }

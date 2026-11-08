@@ -7,7 +7,7 @@
 import { generate, generateJson } from "../detection/gemini.js";
 import { LEVEL_LABEL, atLeast, type RiskLevel } from "../detection/risk.js";
 import { FLAG_LABELS, SCAM_TYPES } from "../detection/questions.js";
-import { getCircleForProtected, getSafeWordRow } from "../family/circle.js";
+import { getCircleForUser, getSafeWordRow } from "../family/circle.js";
 import { decryptWord } from "../family/crypto.js";
 import { redactSafeWord } from "./talk.js";
 import { scrubModelText } from "../photon/links.js";
@@ -30,7 +30,7 @@ const CONCRETE_ASKS = ["asks_code", "money_or_code", "remote_access"];
 
 /** The plain safe word of the user's circle (never logged), or null if they have none. Throws on DB errors. */
 export async function loadSafeWord(userId: string): Promise<string | null> {
-  const circle = await getCircleForProtected(userId);
+  const circle = await getCircleForUser(userId);
   const enc = circle ? await getSafeWordRow(circle.id) : null;
   return enc && circle ? decryptWord(enc, circle.id) : null;
 }

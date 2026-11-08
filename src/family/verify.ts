@@ -51,11 +51,13 @@ export async function placeVerificationCall(args: {
   circleId: string;
   relative: Member;
   protectedName: string;
+  /** The family member being targeted (who gets the result texts). */
+  targetUserId: string;
 }): Promise<{ verifyId: string; conversationId: string | null }> {
   const { circleId, relative } = args;
   const row = await one<{ id: string }>(
-    "INSERT INTO verifications (circle_id, relative_id, status) VALUES ($1, $2, 'calling') RETURNING id",
-    [circleId, relative.id],
+    "INSERT INTO verifications (circle_id, relative_id, status, target_user_id) VALUES ($1, $2, 'calling', $3) RETURNING id",
+    [circleId, relative.id, args.targetUserId],
   );
   const verifyId = row!.id;
   const s: VerifySession = {
@@ -254,7 +256,8 @@ async function findSession(vars: Record<string, string>): Promise<VerifySession 
   const where = isUuid(id) ? ["v.id = $1", id] : vars.conv ? ["v.conversation_id = $1", vars.conv] : null;
   if (!where) return null;
   const row = await one<{ id: string; circle_id: string; relative_id: string; status: string; conversation_id: string | null; protected_user_id: string; created_at: Date }>(
-    `SELECT v.id, v.circle_id, v.relative_id, v.status, v.conversation_id, v.created_at, c.protected_user_id
+    `SELECT v.id, v.circle_id, v.relative_id, v.status, v.conversation_id, v.created_at,
+            COALESCE(v.target_user_id, c.protected_user_id) AS protected_user_id
        FROM verifications v JOIN circles c ON c.id = v.circle_id WHERE ${where[0]}`,
     [where[1]],
   );

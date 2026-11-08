@@ -13,7 +13,7 @@ import { LEVEL_LABEL, atLeast } from "../detection/risk.js";
 import { FLAG_LABELS } from "../detection/questions.js";
 import { startFamilyEmergency } from "../family/index.js";
 import { saysAlreadyPaid, startRecovery } from "../recovery/index.js";
-import { getCircleForProtected, getSafeWordRow } from "../family/circle.js";
+import { getCircleForUser, getSafeWordRow } from "../family/circle.js";
 import { decryptWord, editDistance, normalizeWord, type EncryptedWord } from "../family/crypto.js";
 import { ADDRESSED_QUESTION, ACTION_QUESTION, WAKE_QUESTION } from "./questions.js";
 import { scoreNow, callerTranscript } from "./score.js";
@@ -660,7 +660,7 @@ function safeWordRef(s: CallSession): Promise<WordRef> {
       await s.identifying;
       if (s.userId === null) throw new Error("caller not identified yet");
       if (s.userId === "unknown") return null;
-      const circle = await getCircleForProtected(s.userId);
+      const circle = await getCircleForUser(s.userId);
       const enc = circle ? await getSafeWordRow(circle.id) : null;
       return enc && circle ? { enc, circleId: circle.id } : null;
     })();
