@@ -37,18 +37,23 @@ export function stripLinks(text: string): string {
     // Keep sentence punctuation that the path pattern swallowed ("...ntta-pay.top/x)." ).
     const trail = match.match(/[.,!?;:)\]'"]+$/)?.[0] ?? "";
     if (allowed(host) && !match.includes("@")) return match;
+    if (match.replace(/[.,!?;:)\]'"]+$/, "").toLowerCase() === config.photon.imessageHandle.toLowerCase()) return match; // Bouncer's own Apple ID
     return REPLACEMENT + trail;
   });
 }
 
-/** Replaces phone numbers in model-written text, except Bouncer's own voice number. */
+/** Bouncer's own numbers (voice line and iMessage line), last 10 digits. */
+const OWN = [config.photon.voiceNumber, config.photon.imessageHandle]
+  .map((n) => n.replace(/\D/g, "").slice(-10))
+  .filter((d) => d.length === 10);
+
+/** Replaces phone numbers in model-written text, except Bouncer's own numbers. */
 export function stripPhones(text: string): string {
-  const own = config.photon.voiceNumber.replace(/\D/g, "").slice(-10);
   const found = findPhoneNumbersInText(text, "US");
   let out = "";
   let at = 0;
   for (const f of found) {
-    if (f.number.nationalNumber.slice(-10) === own) continue;
+    if (OWN.includes(String(f.number.nationalNumber).slice(-10))) continue;
     out += text.slice(at, f.startsAt) + "(number hidden)";
     at = f.endsAt;
   }
