@@ -79,10 +79,12 @@ export async function onCallEnded(evt: PostCallEvent): Promise<void> {
   const summary = `Call summary: Bouncer spotted ${n} red flag${n === 1 ? "" : "s"}: ${list}.`;
   // ifFree: never overwrite a live action (e.g. "Reply YES and I'll call Jake"). If the slot is taken,
   // don't ask the question either, or the user's YES would go to the other action.
-  const asked = eventId ? setPending(s.userId, "call_feedback", { eventId }, 30 * 60_000, { ifFree: true }) : false;
+  const asked = eventId ? setPending(s.userId, "call_feedback", { eventId }, 5 * 60_000, { ifFree: true }) : false;
   await textUser(s.userId, [asked ? `${summary} Was it a scam? Reply YES or NO.` : summary], keyPrefix);
 }
 
+// Always handled (returns true): the feedback row is stored and the user gets a thank-you text.
+// The window is short (5 min) so a later, unrelated YES / NO isn't taken as call feedback.
 registerPendingHandler("call_feedback", async (userId, data, answer) => {
   const eventId = typeof data.eventId === "string" ? data.eventId : null;
   await query("INSERT INTO feedback (user_id, event_id, answer) VALUES ($1, $2, $3)", [userId, eventId, answer]);
@@ -91,4 +93,5 @@ registerPendingHandler("call_feedback", async (userId, data, answer) => {
     [answer === "yes" ? "Thanks for telling me. That helps me catch the next one." : "Thanks. Glad it was a real call."],
     `bouncer:feedback:${eventId ?? Date.now()}`,
   );
+  return true;
 });

@@ -16,7 +16,8 @@ export { familyTimings } from "./timings.js";
  * Flow 3 step 4 trigger. `source: "text"` = Grandma texted about it (call the relative right away);
  * `source: "call"` = live listen saw family_danger ≥ 0.7 (ask "Reply YES and I'll call…" first, rule 4).
  * `content` is the message text or call transcript: in memory only, never stored or logged.
- * Safe to call repeatedly: repeat triggers during an active emergency are ignored.
+ * Safe to call repeatedly: repeat call triggers during an active emergency are ignored; a repeat text
+ * trigger gets a reply (it is the go-ahead while awaiting YES, else a short status text).
  */
 export async function startFamilyEmergency(args: { userId: string; content: string; source: "text" | "call" }): Promise<void> {
   try {

@@ -6,7 +6,7 @@ export const familyTimings = {
   verifyHardCapMs: 150_000,
   /** Step 11: wait this long for Grandma's NO/YES before alerting the circle without "No money was sent." */
   alertWaitMs: 2 * 60_000,
-  /** Repeat triggers (live listen fires on every turn) inside this window are ignored. */
+  /** Repeat call-triggered emergencies (live listen fires on every turn) inside this window are ignored. Text triggers always get a reply. */
   retriggerCooldownMs: 5 * 60_000,
   /** How long an emergency stays active for "what's the word?" texts. */
   emergencyTtlMs: 30 * 60_000,

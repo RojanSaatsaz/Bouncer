@@ -17,12 +17,23 @@ export interface SendTextArgs {
   /** Same key on retry = no duplicate message. Convention: "bouncer:<msgId>:<n>". */
   idempotencyKey: string;
   parentMessageId?: string;
+  /** Text carries a secret (the decrypted family word): DRY_RUN prints only its length (rule 2). */
+  sensitive?: boolean;
 }
+
+/**
+ * DRY_RUN only: every text that would have been sent, in full, in memory (never logged), so test
+ * scripts can check sensitive texts. Capped so a long DRY_RUN session can't grow it forever.
+ */
+export const dryRunOutbox: Array<{ spaceId: string; text: string; sensitive: boolean }> = [];
 
 /** Sends one plain-text iMessage. Photon accepts it for async dispatch (not proof of delivery). */
 export async function sendText(args: SendTextArgs): Promise<void> {
   if (config.photon.dryRun) {
-    console.log(`[photon:dry-run] → space ${args.spaceId.slice(0, 12)}…  ${args.text}`);
+    dryRunOutbox.push({ spaceId: args.spaceId, text: args.text, sensitive: !!args.sensitive });
+    if (dryRunOutbox.length > 500) dryRunOutbox.shift();
+    const shown = args.sensitive ? `(sensitive, ${args.text.length} chars)` : args.text;
+    console.log(`[photon:dry-run] → space ${args.spaceId.slice(0, 12)}…  ${shown}`);
     return;
   }
   try {

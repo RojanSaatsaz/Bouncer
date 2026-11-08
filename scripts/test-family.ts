@@ -25,7 +25,8 @@ const { query, one, pool } = await import("../src/db.js");
 const { getOrCreateUser, saveConversation, getUserById } = await import("../src/users.js");
 const { seedCircle } = await import("../src/family/seed.js");
 const family = await import("../src/family/index.js");
-const { resolvePending, peekPending } = await import("../src/pending.js");
+const { resolvePending, peekPending, setPending } = await import("../src/pending.js");
+const { dryRunOutbox } = await import("../src/photon/client.js");
 const { parseSystemVars } = await import("../src/voice/sse.js");
 const cr = await import("../src/family/crypto.js");
 
@@ -298,14 +299,57 @@ try {
     await resolvePending(ids.gma, "no");
   }
 
+  section("4b: call-sourced emergency → Grandma texts about it herself → that's the go-ahead");
+  {
+    const transcript = "caller: grandma it's me jake, I'm in trouble, I got arrested, I need you to send bail money, please don't tell mom";
+    await family.startFamilyEmergency({ userId: ids.gma, content: transcript, source: "call" });
+    check("verify_call pending", peekPending(ids.gma)?.kind === "verify_call");
+    const before = await verificationCount();
+    let t = mark();
+    await family.startFamilyEmergency({ userId: ids.gma, content: "Jake is calling me saying he's in trouble", source: "text" });
+    const msgs = textsTo(SPACE.gma, t);
+    check("text trigger → 'Calling Jake now' reply", msgs.some((x) => x === "Calling Jake now. I'll text you what I find."), msgs.join(" | "));
+    check("text trigger → call placed, YES prompt cleared", (await verificationCount()) === before + 1 && peekPending(ids.gma)?.kind !== "verify_call");
+
+    section("4c: text trigger again while calling / after the result → status reply, no new call");
+    t = mark();
+    await family.startFamilyEmergency({ userId: ids.gma, content: "Jake is calling me again", source: "text" });
+    const busy = textsTo(SPACE.gma, t);
+    check("while calling → 'already checking' reply", busy.length === 1 && busy[0] === "I'm already checking on Jake. I'll text you as soon as I know.", busy.join(" | "));
+    check("while calling → no second call", (await verificationCount()) === before + 1);
+    const v = await latestVerification();
+    await family.onVerifyCallEnded(v!.conversation_id, { failed: true });
+    t = mark();
+    await family.startFamilyEmergency({ userId: ids.gma, content: "Jake is calling me again", source: "text" });
+    const done = textsTo(SPACE.gma, t);
+    check("after the result → status reply, no new call", done.length === 1 && done[0].startsWith("I already checked on Jake.") && (await verificationCount()) === before + 1, done.join(" | "));
+    await resolvePending(ids.gma, "no");
+  }
+
+  section("3b: stale YES / NO is not swallowed");
+  {
+    setPending(ids.gma, "loss_question", { emergencyId: "gone-emergency" });
+    check("stale loss_question → resolvePending false (router replies)", (await resolvePending(ids.gma, "yes")) === false);
+    check("stale action was dropped", peekPending(ids.gma) === null);
+    setPending(ids.gma, "verify_call", { emergencyId: "gone-emergency" });
+    const before = await verificationCount();
+    check("stale verify_call → resolvePending false, no call", (await resolvePending(ids.gma, "yes")) === false && (await verificationCount()) === before);
+  }
+
   section("6: Grandma texts during an emergency");
   {
     const v = await textEmergency("Jake says he's in the hospital and needs money for the bill");
     const gma = (await getUserById(ids.gma))!;
     let t = mark();
+    const ob = dryRunOutbox.length;
     const r1 = await family.handleFamilyText(gma, inbound("What's the safe word again?"));
     const w = textsTo(SPACE.gma, t);
-    check("asked for the word → texted in her thread", r1 && w.length === 1 && w[0] === `Your family word is: ${TEST_WORD}. Delete this after the call.`);
+    const sent = dryRunOutbox.slice(ob);
+    check(
+      "asked for the word → texted in her thread (log shows length only)",
+      r1 && w.length === 1 && /^\(sensitive, \d+ chars\)$/.test(w[0]) && sent.length === 1 && sent[0].spaceId === SPACE.gma && sent[0].sensitive && sent[0].text === `Your family word is: ${TEST_WORD}. Delete this after the call.`,
+      w.join(" | "),
+    );
     t = mark();
     const r2 = await family.handleFamilyText(gma, inbound("He said the word!"));
     check("caller gave the word → likely really him", r2 && textsTo(SPACE.gma, t)[0] === "Then it's very likely really him. Call him back on his saved number to be sure.");
@@ -327,10 +371,10 @@ try {
   section("privacy");
   {
     check("word never spoken on a call", spoken.length > 10 && spoken.every((s) => !cr.wordsMatch(s, TEST_WORD) && !s.toLowerCase().includes("purple")));
-    const leaks = logs.filter((l) => /purple|eleph|elef/i.test(l) && !l.startsWith("[photon:dry-run]") && !/^(PASS|FAIL)/.test(l));
-    check("word never in logs (outside DRY_RUN text prints)", leaks.length === 0, leaks.join(" | "));
-    const dry = logs.filter((l) => l.startsWith("[photon:dry-run]") && /purple/i.test(l));
-    check("only the requested word text contains it", dry.length === 1 && dry[0].includes("Your family word is"));
+    const leaks = logs.filter((l) => /purple|eleph|elef/i.test(l) && !/^(PASS|FAIL)/.test(l));
+    check("word never in logs (DRY_RUN prints included)", leaks.length === 0, leaks.join(" | "));
+    const dry = dryRunOutbox.filter((m) => /purple/i.test(m.text));
+    check("only the requested word text contains it, flagged sensitive", dry.length === 1 && dry[0].sensitive && dry[0].text.includes("Your family word is"));
     const contentLeak = logs.filter((l) => /jail|bail|crashed|hospital|car accident/i.test(l) && !/^(PASS|FAIL|===)/.test(l));
     check("message / transcript content never logged", contentLeak.length === 0, contentLeak.join(" | "));
     const ev = await query<{ outcome: string; flags: string[]; risk_level: string | null }>(

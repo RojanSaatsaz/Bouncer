@@ -8,7 +8,12 @@ export interface PendingAction {
   expiresAt: number;
 }
 
-type Handler = (userId: string, data: Record<string, unknown>, answer: "yes" | "no") => Promise<void>;
+/**
+ * Returns false when the action turned out to be stale (e.g. the emergency it belonged to expired):
+ * resolvePending then reports "not consumed" so the router handles the YES / NO normally and the user
+ * still gets a reply. true / undefined = handled (the handler sent its own reply).
+ */
+type Handler = (userId: string, data: Record<string, unknown>, answer: "yes" | "no") => Promise<boolean | void>;
 
 const pending = new Map<string, PendingAction>();
 const handlers = new Map<string, Handler>();
@@ -44,7 +49,13 @@ export function peekPending(userId: string): PendingAction | null {
   return p;
 }
 
-/** Returns true if a pending action consumed this YES/NO. */
+/** Drops the user's parked action (only if it is of `kind`, when given). */
+export function clearPending(userId: string, kind?: string): void {
+  const p = pending.get(userId);
+  if (p && (!kind || p.kind === kind)) pending.delete(userId);
+}
+
+/** Returns true if a pending action consumed this YES/NO (false if none, or its handler declined it). */
 export async function resolvePending(userId: string, answer: "yes" | "no"): Promise<boolean> {
   const p = peekPending(userId);
   if (!p) return false;
@@ -54,8 +65,7 @@ export async function resolvePending(userId: string, answer: "yes" | "no"): Prom
     console.warn(`[pending] no handler registered for "${p.kind}"`);
     return false;
   }
-  await h(userId, p.data, answer);
-  return true;
+  return (await h(userId, p.data, answer)) !== false;
 }
 
 /** YES / NO detection for short replies ("yes", "Yes!", "y", "yeah", "no", "nope"). */

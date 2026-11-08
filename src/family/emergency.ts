@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { one, query } from "../db.js";
 import { askJev, choice } from "../detection/jev.js";
-import { registerPendingHandler, setPending } from "../pending.js";
+import { clearPending, registerPendingHandler, setPending } from "../pending.js";
 import { sendText } from "../photon/client.js";
 import type { InboundMessage } from "../photon/socket.js";
 import { textUser, type User } from "../users.js";
@@ -70,7 +70,29 @@ const textProtected = (em: Emergency, tag: string, lines: string[]) =>
 export async function startFamilyEmergencyImpl(args: { userId: string; content: string; source: "text" | "call" }) {
   const { userId, content, source } = args;
   const prev = activeEmergency(userId);
-  if (prev?.relative) {
+  if (prev?.relative && source === "text") {
+    // The user typed this themselves, and the router sends nothing else: always answer.
+    const name = prev.relative.name;
+    if (prev.stage === "awaiting_yes") {
+      // A text is the go-ahead rule 4 asks for: drop the "Reply YES" question and call now.
+      clearPending(userId, "verify_call");
+      console.log(`[family] text trigger for user ${short(userId)} during awaiting_yes; calling now`);
+      await textProtected(prev, "call-text", [`Calling ${name} now. I'll text you what I find.`]);
+      await startCall(prev);
+      return;
+    }
+    if (prev.stage === "coached" || prev.stage === "calling" || prev.stage === "result") {
+      console.log(`[family] text trigger for user ${short(userId)} during ${prev.stage}; status sent`);
+      const status =
+        prev.stage === "result"
+          ? `I already checked on ${name}. See my last text, and don't send money.`
+          : `I'm already checking on ${name}. I'll text you as soon as I know.`;
+      await textProtected(prev, `status-${Date.now()}`, [status]);
+      return;
+    }
+    // closed: a new emergency starts below.
+  } else if (prev?.relative) {
+    // Live listen fires on every scored turn: ignore repeats while one is in progress or just finished.
     const busy = prev.stage === "awaiting_yes" || prev.stage === "calling" || prev.stage === "result";
     const recent = Date.now() - prev.startedAt < familyTimings.retriggerCooldownMs;
     if (busy || recent) {
@@ -170,7 +192,7 @@ async function startCall(em: Emergency) {
 
 registerPendingHandler("verify_call", async (userId, data, answer) => {
   const em = activeEmergency(userId);
-  if (!em || em.id !== data.emergencyId || em.stage !== "awaiting_yes" || !em.relative) return;
+  if (!em || em.id !== data.emergencyId || em.stage !== "awaiting_yes" || !em.relative) return false; // stale: router replies
   if (answer === "yes") {
     await textProtected(em, "call-yes", [`Calling ${em.relative.name} now. I'll text you what I find.`]);
     await startCall(em);
@@ -181,6 +203,7 @@ registerPendingHandler("verify_call", async (userId, data, answer) => {
     await textProtected(em, "call-no", ["Okay, I won't call. Don't send money, and ask the caller for the family safe word."]);
     await logEvent(em, 0);
   }
+  return true;
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -235,7 +258,9 @@ export async function onVerificationResult(r: {
 
   const target = em;
   clearTimeout(em.alertTimer);
-  em.alertTimer = setTimeout(() => void sendCircleAlert(target), familyTimings.alertWaitMs);
+  em.alertTimer = setTimeout(() => {
+    sendCircleAlert(target).catch((err) => console.error(`[family] circle alert for ${short(target.userId)} failed: ${err?.message}`));
+  }, familyTimings.alertWaitMs);
   em.alertTimer.unref?.();
 }
 
@@ -246,7 +271,7 @@ const LOSS_CHECKLIST =
 
 registerPendingHandler("loss_question", async (userId, data, answer) => {
   const em = activeEmergency(userId);
-  if (!em || em.id !== data.emergencyId) return;
+  if (!em || em.id !== data.emergencyId) return false; // stale: router replies
   em.loss = answer;
   if (answer === "yes") {
     await textProtected(em, "loss-yes", [LOSS_CHECKLIST]);
@@ -259,6 +284,7 @@ registerPendingHandler("loss_question", async (userId, data, answer) => {
     if (answer === "no") await alertGuardians(em, [`Update: ${em.protectedName} says no money was sent.`], "update");
     if (em.eventId) await query("UPDATE events SET flags = $2 WHERE id = $1", [em.eventId, eventFlags(em)]);
   }
+  return true;
 });
 
 /** Step 11: type and outcome only. "No money was sent." only after an explicit NO. */
@@ -387,7 +413,13 @@ export async function handleFamilyTextImpl(user: User, msg: InboundMessage): Pro
       return true;
     }
     em.wordTexts++;
-    await reply(`word-${em.wordTexts}`, `Your family word is: ${decryptWord(enc, em.circleId)}. Delete this after the call.`);
+    await sendText({
+      spaceId: msg.spaceId,
+      senderId: msg.agentUserId,
+      text: `Your family word is: ${decryptWord(enc, em.circleId)}. Delete this after the call.`,
+      idempotencyKey: `family:${em.id}:word-${em.wordTexts}:${msg.id}`,
+      sensitive: true, // rule 2: DRY_RUN prints only its length
+    });
     console.log(`[family] sent the family word to protected user ${short(user.id)} (text only)`);
     return true;
   }

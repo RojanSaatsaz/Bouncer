@@ -140,7 +140,9 @@ async function outboundCall(verifyId: string, relativeId: string, to: string, re
 
 function armTimer(s: VerifySession, ms: number) {
   clearTimeout(s.timer);
-  s.timer = setTimeout(() => void onTimer(s), ms);
+  s.timer = setTimeout(() => {
+    onTimer(s).catch((err) => console.error(`[family] verification ${short(s.verifyId)} timer failed: ${err?.message}`));
+  }, ms);
   s.timer.unref?.();
 }
 
@@ -191,7 +193,7 @@ export async function handleVerifyTurnImpl(body: any, vars: Record<string, strin
     s.firstTurnIndex = userIndex;
     const r = await firstTurnChecks(text);
     if (r.voicemail >= 0.7) {
-      void finalizeVerification(s.verifyId, "unreachable", "voicemail");
+      finalizeInBackground(s.verifyId, "unreachable", "voicemail");
       return endCall(`Please call ${s.protectedName} when you get this. Goodbye.`, "reached voicemail");
     }
     s.saysUnsafe = r.saysUnsafe;
@@ -204,7 +206,7 @@ export async function handleVerifyTurnImpl(body: any, vars: Record<string, strin
   const matched = s.enc ? wordsMatch(text, decryptWord(s.enc, s.circleId)) : false;
   if (matched) {
     const status: VerifyStatus = s.saysUnsafe >= 0.6 ? "verified_needs_help" : "verified_safe";
-    void finalizeVerification(s.verifyId, status, "safe_word");
+    finalizeInBackground(s.verifyId, status, "safe_word");
     let goodbye = `Thank you, that's right. I'll let ${s.protectedName} know. Goodbye.`;
     if (wordsMatch(goodbye, decryptWord(s.enc!, s.circleId))) goodbye = "Thank you, that's right. Goodbye.";
     return endCall(goodbye, "safe word confirmed");
@@ -214,7 +216,7 @@ export async function handleVerifyTurnImpl(body: any, vars: Record<string, strin
 
   s.misses.add(userIndex);
   if (s.misses.size >= 2) {
-    void finalizeVerification(s.verifyId, "failed", "safe_word_missed_twice");
+    finalizeInBackground(s.verifyId, "failed", "safe_word_missed_twice");
     return endCall("Thanks, I'll pass that on. Goodbye.", "safe word not confirmed");
   }
   return say(ASK_AGAIN);
@@ -303,6 +305,13 @@ export async function finalizeVerification(verifyId: string, status: VerifyStatu
     console.error(`[family] follow-up for verification ${short(verifyId)} failed: ${err?.message}`);
   }
   return true;
+}
+
+/** For the call turns: the spoken reply goes out now, the result texts follow. Never an unhandled rejection. */
+function finalizeInBackground(verifyId: string, status: VerifyStatus, decidedBy: string): void {
+  finalizeVerification(verifyId, status, decidedBy).catch((err) =>
+    console.error(`[family] finalizing verification ${short(verifyId)} failed: ${err?.message}`),
+  );
 }
 
 /** Post-call webhook (Flow 2) or call_initiation_failure for a Verify-agent conversation. */
