@@ -1,6 +1,7 @@
 // Photon Socket.IO event stream (SPEC Flow 1 steps 1–2). One server instance only (rule 5).
 // Verified: connect + subscribe ack { ok, apiVersion: "2026-07-01", limits }, delivery = [envelope, { seq, replyExpected }].
-// The message's place inside the envelope is read defensively (see findMessage) until confirmed from a live event.
+// Verified from a live event (2026-11-08): envelope = { id: "pho_evt_…", apiVersion, type: "message.received",
+// source, timestamp, data: { object: <Message>, projectId } }, replyExpected: false.
 import { io, type Socket } from "socket.io-client";
 import { config } from "../config.js";
 import { query, one } from "../db.js";
@@ -33,10 +34,11 @@ function shape(v: any, k = ""): any {
   return typeof v;
 }
 
-/** Finds the Photon message object inside a delivery envelope. */
-function findMessage(env: any): any | null {
-  const candidates = [env?.data?.message, env?.data?.object, env?.data, env?.message, env?.payload, env];
-  return candidates.find((c) => c && typeof c === "object" && c.content && c.sentBy && c.space) ?? null;
+/** The Photon message inside a `message.received` envelope (`data.object`); null for any other event type. */
+export function findMessage(env: any): any | null {
+  if (env?.type !== "message.received") return null;
+  const m = env?.data?.object;
+  return m && typeof m === "object" && m.content && m.sentBy && m.space ? m : null;
 }
 
 export function normalize(m: any): InboundMessage | null {
