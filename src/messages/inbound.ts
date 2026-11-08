@@ -6,10 +6,51 @@ import { getOrCreateUser, saveConversation, setOptedIn, markListenPending, type 
 import { sendLines, setTyping, downloadAttachment } from "../photon/client.js";
 import { parseYesNo, resolvePending } from "../pending.js";
 import { handleFamilyText, startFamilyEmergency } from "../family/index.js";
-import { choice, type JevQuestion } from "../detection/jev.js";
+import { askJev, choice, type JevQuestion } from "../detection/jev.js";
 import { extractScreenshot, type Extracted } from "../detection/extract.js";
-import { isKnownContact, scanMessage, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
+import { isKnownContact, scoreAnswers, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
+import { MESSAGE_QUESTIONS } from "../detection/questions.js";
+import { atLeast } from "../detection/risk.js";
 import { writeVerdictReply, answerQuestion } from "../detection/reply.js";
+
+const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
+
+/**
+ * Same as scan.ts scanMessage, but with a tight Jev budget for a live user (the defaults of 20 s × 3
+ * retries suit the eval, not a chat): one retry, 4 s per try, so a failure surfaces in ~8 s at worst.
+ */
+async function scanLive(state: MessageState, extra: Record<string, JevQuestion> = {}): Promise<ScanResult> {
+  const r = await askJev(state, { ...MESSAGE_QUESTIONS, ...extra }, { retries: 1, timeoutMs: 4_000 });
+  return scoreAnswers(r, !!state.known_contact);
+}
+
+/** Rejects after `ms`. The losing promise is left to settle on its own (its result is dropped). */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const t = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([p, t]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Attachment bytes with a time limit. Photon can hold the request ~10 s on ATTACHMENT_NOT_READY, and
+ * the client takes no AbortSignal, so race it: 5 s, then one retry while the total stays under ~9 s.
+ */
+async function fetchImage(id: string, t0: number): Promise<{ data: Buffer; contentType: string }> {
+  try {
+    return await withTimeout(downloadAttachment(id), 5_000, "attachment download");
+  } catch (err: any) {
+    const left = t0 + 9_000 - Date.now();
+    if (left < 1_500) throw err;
+    console.warn(`[inbound] ${err?.message}; retrying once`);
+    return await withTimeout(downloadAttachment(id), left, "attachment download retry");
+  }
+}
+
+/** A brand-new user's first text that is more than a hello: probably a pasted message to check. */
+const looksLikeContent = (text: string) =>
+  text.trim().length > 25 || /https?:\/\/|www\.|\b[a-z0-9-]+\.[a-z]{2,}\/?\b|\d{3,}/i.test(text);
 
 const WELCOME =
   "Hi, I'm Bouncer from T-Mobile. Send me any text, DM or screenshot you're unsure about and I'll check it. " +
@@ -42,19 +83,21 @@ const LISTEN_RE = /^\s*(listen|listen in|start listening)\s*[.!]?\s*$/i;
 export async function handleInbound(msg: InboundMessage): Promise<void> {
   const t0 = Date.now();
   const { user, created } = await getOrCreateUser(msg.senderHandle);
-  await saveConversation(user.id, msg.spaceId, msg.agentUserId);
+  // Only a 1:1 thread becomes the user's alert thread: alerts must never go into a group chat.
+  if (msg.spaceKind === "direct") await saveConversation(user.id, msg.spaceId, msg.agentUserId);
   const say = (lines: string[], tag = "1") =>
     sendLines({ spaceId: msg.spaceId, senderId: msg.agentUserId, keyPrefix: `bouncer:${msg.id}:${tag}` }, lines);
   const uid = user.id.slice(0, 8);
+  const text = msg.text ?? "";
 
   if (created) {
     await say([WELCOME], "w");
     console.log(`[inbound] new user ${uid}`);
-    if (!msg.attachmentIds.length) return; // a screenshot as the very first message still gets checked
+    // A screenshot or a pasted message as the very first text still gets checked; a hello or YES stops here.
+    if (!msg.attachmentIds.length && !looksLikeContent(text)) return;
   }
 
   if (msg.attachmentIds.length) return handleScreenshot(user, msg, say, t0);
-  const text = msg.text ?? "";
 
   // 1. YES / NO for an action another flow parked (verify call, loss question, call feedback, …).
   const yn = parseYesNo(text);
@@ -83,7 +126,14 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
   setTyping(msg.spaceId, msg.agentUserId, true);
   try {
     const state: MessageState = { body: text };
-    const scan = await scanMessage(state, INTENT);
+    let scan: ScanResult;
+    try {
+      scan = await scanLive(state, INTENT);
+    } catch (err: any) {
+      console.error(`[inbound] text scan failed for ${msg.id} after ${Date.now() - t0} ms: ${err?.message}`);
+      await say([SORRY], "err");
+      return;
+    }
     const intent = choice(scan.jev, "intent");
     console.log(`[inbound] user ${uid} text intent=${intent.label} (${intent.confidence.toFixed(2)}) level=${scan.risk.level}`);
 
@@ -103,8 +153,9 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
         await say(["I can't set up a family circle by text yet. Once one is set up, I can check on a relative when someone claims they're in trouble."]);
         return;
       case "question":
-        // A long text that Jev also thinks is risky is almost certainly a pasted message: check it.
-        if (!(text.length > 80 && scan.risk.level !== "safe")) {
+        // Jev's scan wins (rule 3): Likely scam or above always gets the verdict, at any length. A long
+        // text that Jev also thinks is risky is almost certainly a pasted message: check it too.
+        if (!atLeast(scan.risk.level, "likely_scam") && !(text.length > 80 && scan.risk.level !== "safe")) {
           await say([await answerQuestion(text)]);
           return;
         }
@@ -118,14 +169,17 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
 type Say = (lines: string[], tag?: string) => Promise<void>;
 
 async function handleScreenshot(user: User, msg: InboundMessage, say: Say, t0: number) {
+  // Start downloading while "Looking at it now..." is sent (the download is 1–3.5 s of the 6 s budget).
+  const downloads = msg.attachmentIds.slice(0, 3).map((id) => fetchImage(id, t0));
+  downloads.forEach((p) => p.catch(() => {})); // handled below; avoids an unhandled rejection meanwhile
   await say(["Looking at it now..."], "look");
   setTyping(msg.spaceId, msg.agentUserId, true);
   try {
     let extracted: Extracted[];
     try {
       extracted = await Promise.all(
-        msg.attachmentIds.slice(0, 3).map(async (id) => {
-          let img: { data: Buffer; contentType: string } | null = await downloadAttachment(id);
+        downloads.map(async (download) => {
+          let img: { data: Buffer; contentType: string } | null = await download;
           if (!img.contentType.startsWith("image/")) return null;
           try {
             return await extractScreenshot(img.data, img.contentType);
@@ -154,7 +208,14 @@ async function handleScreenshot(user: User, msg: InboundMessage, say: Say, t0: n
       claimed_brand: first.claimed_brand,
       known_contact: knownContact,
     };
-    const scan = await scanMessage(state);
+    let scan: ScanResult;
+    try {
+      scan = await scanLive(state);
+    } catch (err: any) {
+      console.error(`[inbound] screenshot scan failed for ${msg.id} after ${Date.now() - t0} ms: ${err?.message}`);
+      await say([SORRY], "err");
+      return;
+    }
     console.log(`[inbound] user ${user.id.slice(0, 8)} screenshot level=${scan.risk.level} flags=${scan.flags.join(",")}`);
     await reply(user, msg, say, scan, state.body, first.claimed_brand, first.sender, t0);
   } finally {
@@ -173,7 +234,8 @@ async function reply(
   sender: string | null,
   t0: number,
 ) {
-  const lines = await writeVerdictReply(scan, body, claimedBrand);
+  // Wording must finish by t0 + 5.5 s; past ~4.5 s elapsed the template is used (6 s target).
+  const lines = await writeVerdictReply(scan, body, claimedBrand, { deadline: t0 + 5_500 });
   await say(lines.filter((l) => l.trim()));
   const latencyMs = Date.now() - t0;
   console.log(`[inbound] replied to ${msg.id} in ${latencyMs} ms`);

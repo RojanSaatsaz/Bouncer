@@ -53,12 +53,24 @@ export function templateReply(scan: ScanResult, claimedBrand?: string | null): s
 /**
  * Gemini wording (fast tier, ~0.6 s) with the code-made verdict prefix enforced; falls back to the
  * template on any error. `body` is the message, in memory only, so the wording can be specific.
+ * `deadline` (epoch ms): the wording must be done by then; with under 1 s left, the template is used
+ * without calling Gemini. One tier only, no fallback.
  */
-export async function writeVerdictReply(scan: ScanResult, body: string, claimedBrand?: string | null): Promise<string[]> {
+export async function writeVerdictReply(
+  scan: ScanResult,
+  body: string,
+  claimedBrand?: string | null,
+  opts: { deadline?: number } = {},
+): Promise<string[]> {
   const prefix = verdictPrefix(scan);
   const fallback = templateReply(scan, claimedBrand);
   const flags = topFlags(scan).map((f) => FLAG_LABELS[f] ?? f);
   if (scan.risk.level === "safe") return fallback; // nothing for Gemini to add, and it tends to over-reassure
+  const left = (opts.deadline ?? Infinity) - Date.now();
+  if (left < 1_000) {
+    console.warn(`[reply] out of time budget, using template`);
+    return fallback;
+  }
   try {
     const out = await generateJson<{ line1: string; line2: string; line3: string }>({
       tier: "fast",
@@ -78,7 +90,8 @@ export async function writeVerdictReply(scan: ScanResult, body: string, claimedB
       ],
       jsonSchema: SCHEMA,
       temperature: 0.3,
-      timeoutMs: 3_000,
+      timeoutMs: Math.min(3_000, left),
+      noFallback: true,
     });
     let line1 = (out.line1 ?? "").trim();
     // The verdict is ours: if Gemini changed or dropped it, put the exact prefix back.

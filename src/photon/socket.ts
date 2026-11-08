@@ -79,6 +79,19 @@ async function saveCursor(seq: number) {
   );
 }
 
+// Cursor = last seq whose handling has settled AND every earlier seq has too (conversations run in
+// parallel, so jobs finish out of order). Resuming from it may replay a few events; processed_messages
+// dedupes them. A failing message still settles, so it never blocks the cursor.
+const inflight = new Set<number>();
+let highestSettled = 0;
+async function settle(seq: number | undefined) {
+  if (typeof seq !== "number") return;
+  inflight.delete(seq);
+  highestSettled = Math.max(highestSettled, seq);
+  const safe = inflight.size ? Math.min(highestSettled, Math.min(...inflight) - 1) : highestSettled;
+  if (safe > 0) await saveCursor(safe).catch((err) => console.error("[photon] cursor save failed:", err?.message));
+}
+
 // Messages from the same conversation are handled one at a time, in order; different users run in parallel.
 const chains = new Map<string, Promise<void>>();
 function enqueue(key: string, job: () => Promise<void>) {
@@ -126,20 +139,20 @@ export function startPhotonSocket(handler: Handler) {
       console.log(`[photon] delivery type=${env?.type} seq=${meta?.seq} shape=${JSON.stringify(shape(env))}`);
     }
     const msg = normalize(msgObj);
-    try {
-      if (msg && (await claim(msg.id))) {
-        enqueue(msg.spaceId, async () => {
-          try {
-            await handler(msg);
-          } catch (err: any) {
-            console.error(`[photon] handler failed for ${msg.id}:`, err?.message);
-          }
-        });
+    const seq = typeof meta?.seq === "number" ? meta.seq : undefined;
+    if (!msg) return void settle(seq);
+    if (seq !== undefined) inflight.add(seq);
+    // Enqueue synchronously (before any await) so two quick messages in one space keep their order;
+    // the duplicate check runs inside the queued job.
+    enqueue(msg.spaceId, async () => {
+      try {
+        if (await claim(msg.id)) await handler(msg);
+      } catch (err: any) {
+        console.error(`[photon] handler failed for ${msg.id}:`, err?.message);
+      } finally {
+        await settle(seq);
       }
-      if (typeof meta?.seq === "number") await saveCursor(meta.seq);
-    } catch (err: any) {
-      console.error("[photon] delivery bookkeeping failed:", err?.message);
-    }
+    });
   });
 
   socket.connect();

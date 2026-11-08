@@ -38,7 +38,8 @@ export async function extractScreenshot(data: Buffer, mimeType: string): Promise
     parts: [imagePart(data, mimeType), { text: PROMPT }],
     jsonSchema: SCHEMA,
     temperature: 0,
-    timeoutMs: 7_000,
+    // Per tier: quality, then fast on 503/429/timeout. Keeps the screenshot path near the 6 s target.
+    timeoutMs: 3_500,
   });
   return {
     source_app: x.source_app ?? null,

@@ -19,6 +19,8 @@ export interface GenerateArgs {
   temperature?: number;
   maxOutputTokens?: number;
   timeoutMs?: number;
+  /** Don't retry on the other tier (callers with a tight latency budget). */
+  noFallback?: boolean;
 }
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta/models/";
@@ -68,7 +70,7 @@ export async function generate(a: GenerateArgs): Promise<string> {
   try {
     return await once(a, a.tier);
   } catch (err) {
-    if (!(err instanceof Retryable)) throw err;
+    if (!(err instanceof Retryable) || a.noFallback) throw err;
     console.warn(`[gemini] ${err.message}; falling back to ${other(a.tier)} tier`);
     return await once(a, other(a.tier));
   }

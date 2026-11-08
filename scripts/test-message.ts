@@ -3,6 +3,7 @@
 //   npm run test:message -- text "USPS: your package is on hold, update at usps-help.top"
 //   npm run test:message -- image scripts/fixtures/scam-usps.png
 //   npm run test:message -- scout            (all 30 scout messages, summary table)
+//   npm run test:message -- first "<text>"   (as a brand-new user: welcome, then a verdict if it's a message)
 // Uses the fake handle +15555550190 and deletes its rows afterwards.
 export {};
 process.env.DRY_RUN = "1";
@@ -54,6 +55,10 @@ try {
   if (mode === "text") {
     const r = await run(rest.join(" "));
     origLog(`\n(${r.ms} ms)`);
+  } else if (mode === "first") {
+    await query("DELETE FROM users WHERE id = $1", [user.id]);
+    const r = await run(rest.join(" "));
+    origLog(`\n(${r.ms} ms)`);
   } else if (mode === "image") {
     const r = await run(null, rest.map((p) => `file:${p}`));
     origLog(`\n(${r.ms} ms)`);
@@ -70,10 +75,11 @@ try {
     }
     origLog("\n=== scout summary ===\n" + out.join("\n"));
   } else {
-    origLog('usage: test:message -- text "<message>" | image <file.png> [...] | scout');
+    origLog('usage: test:message -- text "<message>" | first "<message>" | image <file.png> [...] | scout');
   }
 } finally {
-  await query("DELETE FROM events WHERE user_id = $1", [user.id]);
-  await query("DELETE FROM users WHERE id = $1", [user.id]);
+  const ids = [user.id, ...(await query<{ id: string }>("SELECT id FROM users WHERE imessage_handle = $1", [HANDLE])).rows.map((r) => r.id)];
+  await query("DELETE FROM events WHERE user_id = ANY($1)", [ids]);
+  await query("DELETE FROM users WHERE id = ANY($1)", [ids]);
   await pool.end();
 }

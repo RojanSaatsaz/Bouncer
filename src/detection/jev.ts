@@ -42,20 +42,23 @@ export async function askJev(
       });
       if (res.status === 429 || res.status >= 500) {
         lastErr = new Error(`Jev HTTP ${res.status}`);
+        if (attempt === retries) break; // no point sleeping after the last try
         const retryAfter = Number(res.headers.get("retry-after")) * 1000;
         await sleep(retryAfter || 500 * 2 ** attempt + Math.random() * 250);
         continue;
       }
       if (!res.ok) {
-        // 4xx other than 429: a bug in our question set. Body is a validation message, not user content.
-        throw new Error(`Jev HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        // 4xx other than 429: bad model name or question set. The body can echo the state (message
+        // text), so it is never logged or put in the error (rule 1).
+        await res.body?.cancel().catch(() => {});
+        throw new Error(`Jev HTTP ${res.status} (request rejected; check JEV_MODEL and the question set)`);
       }
       const body = (await res.json()) as { model: string; answers: Record<string, JevAnswer> };
       return { model: body.model, answers: body.answers, ms: Date.now() - t0 };
     } catch (err: any) {
       lastErr = err;
       if (String(err?.message).startsWith("Jev HTTP 4")) throw err;
-      await sleep(500 * 2 ** attempt);
+      if (attempt < retries) await sleep(500 * 2 ** attempt);
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
