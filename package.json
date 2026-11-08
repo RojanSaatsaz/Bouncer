@@ -13,7 +13,9 @@
     "test:call": "tsx --env-file=.env scripts/test-call.ts",
     "test:postcall": "tsx --env-file=.env scripts/test-postcall.ts",
     "seed:family": "tsx --env-file=.env scripts/seed-family.ts",
-    "eval": "tsx --env-file=.env scripts/eval.ts"
+    "eval": "tsx --env-file=.env scripts/eval.ts",
+    "eval:archive": "tsx --env-file=.env scripts/eval-archive.ts",
+    "eval:calls": "tsx --env-file=.env scripts/eval-calls.ts"
   },
   "engines": {
     "node": ">=22"
