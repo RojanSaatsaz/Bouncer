@@ -43,10 +43,14 @@ function body(a: GenerateArgs, model: string, stream: boolean) {
   return {
     model,
     stream,
-    reasoning: { enabled: false }, // thinking adds latency and can eat the whole max_tokens budget
+    // Thinking adds latency and, with a small max_tokens, can eat the whole budget: off unless asked for.
+    reasoning: !a.reasoning || a.reasoning === "off" ? { enabled: false } : { effort: a.reasoning, exclude: true },
     provider: { sort: "latency" }, // measured: steadier first-token times across hosts (spoken replies)
     temperature: a.temperature ?? 0.2,
-    ...(a.maxOutputTokens ? { max_tokens: a.maxOutputTokens } : {}),
+    // With reasoning on, max_tokens also covers the hidden thinking: leave room for it.
+    ...(a.maxOutputTokens ? { max_tokens: a.maxOutputTokens + (a.reasoning && a.reasoning !== "off" ? 2000 : 0) } : {}),
+    ...(a.presencePenalty !== undefined ? { presence_penalty: a.presencePenalty } : {}),
+    ...(a.frequencyPenalty !== undefined ? { frequency_penalty: a.frequencyPenalty } : {}),
     ...(a.jsonSchema
       ? { response_format: { type: "json_schema", json_schema: { name: "output", strict: false, schema: toJsonSchema(a.jsonSchema) } } }
       : {}),

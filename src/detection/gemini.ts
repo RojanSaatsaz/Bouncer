@@ -27,6 +27,14 @@ export interface GenerateArgs {
   timeoutMs?: number;
   /** Don't retry on the other tier (callers with a tight latency budget). */
   noFallback?: boolean;
+  /**
+   * OpenRouter only. Model "thinking" before answering. Measured on DeepSeek V4.1 Flash (3-sentence answer):
+   * off 1.6 s, low 3.2 s, medium 4.1 s. Default off: keep it off for anything a caller is waiting on live.
+   */
+  reasoning?: "off" | "low" | "medium" | "high";
+  /** OpenRouter only. Discourage reusing words/phrases (0–2). Helps variety in chat and spoken replies. */
+  presencePenalty?: number;
+  frequencyPenalty?: number;
 }
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta/models/";
