@@ -10,7 +10,8 @@ import { logEvent } from "../detection/scan.js";
 import { alertTexts, callerTranscript } from "./score.js";
 import { writeCallSummary } from "./summary.js";
 import { atLeast } from "../detection/risk.js";
-import { openCase, detectPayment, detectAmounts } from "../messages/case.js";
+import { openCase, detectPayment, detectAmounts, setCaseContact, type CaseFile } from "../messages/case.js";
+import { findOfficialContact, contactLine } from "../contacts/index.js";
 import { addBouncerTurn } from "../messages/history.js";
 
 /** Fields we read from the webhook body. Shapes per https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks */
@@ -84,9 +85,10 @@ async function finishListenCall(
   // The call's key facts become the user's active case before the transcript is dropped, so their next
   // texts ("I already paid", "klarna") are understood. Code reads the transcript here; no model call, and
   // nothing but labels, amounts and a payment method is kept (memory only, 30 min, rule 1).
+  let kase: CaseFile | null = null;
   if (flags.length || atLeast(s.level, "unsure")) {
     const transcript = callerTranscript(s);
-    const c = openCase(s.userId, {
+    const c = (kase = openCase(s.userId, {
       source: "call",
       level: s.level,
       scamType: s.scamType,
@@ -95,7 +97,7 @@ async function finishListenCall(
       payment: detectPayment(transcript),
       amounts: detectAmounts(transcript),
       durationS,
-    });
+    }));
     console.log(`[post-call] conv=${short(conv)} case opened: payment=${c.payment?.method ?? "none"} amounts=${c.amounts.length}`);
   }
 
@@ -146,6 +148,17 @@ async function finishListenCall(
   // Chat memory gets a short note of what Bouncer texted (the case already holds the facts), so a
   // follow-up like "what should I do now?" isn't answered cold. Memory only, like every chat turn.
   addBouncerTurn(s.userId, `[Bouncer texted a call summary] ${clip(summary.text, 320)}`);
+
+  // The caller claimed to be a company or agency: text its real, verified number and website (src/contacts).
+  if (kase?.brand) {
+    const oc = await findOfficialContact(kase.brand, { scamType: s.scamType, timeoutMs: 5_000 });
+    if (oc) {
+      setCaseContact(s.userId, oc);
+      const line = contactLine(oc, "call");
+      await textUser(s.userId, [line], `${keyPrefix}:contact`);
+      addBouncerTurn(s.userId, line);
+    }
+  }
 }
 
 // Always handled (returns true): the feedback row is stored and the user gets a thank-you text.

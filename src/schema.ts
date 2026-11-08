@@ -183,6 +183,21 @@ CREATE TABLE IF NOT EXISTS dashboard_state (
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
 -- ===== end Flow 7 =====
+
+-- ===== Official contacts =====
+-- Cache of verified public contact info for organizations scammers pretend to be (src/contacts).
+-- Public business/agency info only: never user data, message text or who asked. phone/website NULL = looked
+-- up and nothing verified (a negative cache, so the same miss isn't paid for twice).
+CREATE TABLE IF NOT EXISTS official_contacts (
+  key                text PRIMARY KEY,           -- normalised organization name
+  name               text,
+  website            text,
+  phone              text,
+  kind               text,                       -- gov | business
+  source_url         text,
+  checked_at         timestamptz NOT NULL DEFAULT now()
+);
+-- ===== end Official contacts =====
 `;
 
 /** Creates any missing tables. Logs and carries on if it fails (the existing tables still work). */

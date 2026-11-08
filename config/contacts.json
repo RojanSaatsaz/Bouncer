@@ -1,0 +1,569 @@
+{
+  "generated_at": "2026-11-08T14:23:17.176Z",
+  "how": "npm run verify:contacts — each phone was found written on the organization's own domain (web search limited to it).",
+  "entries": [
+    {
+      "key": "irs",
+      "name": "IRS",
+      "aliases": [
+        "irs",
+        "internal revenue service",
+        "us treasury",
+        "department of the treasury",
+        "treasury department"
+      ],
+      "kind": "gov",
+      "domain": "irs.gov",
+      "website": "https://www.irs.gov",
+      "phone": "1-800-829-1040",
+      "source_url": "https://www.irs.gov/"
+    },
+    {
+      "key": "ssa",
+      "name": "Social Security Administration",
+      "aliases": [
+        "social security",
+        "ssa",
+        "social security administration"
+      ],
+      "kind": "gov",
+      "domain": "ssa.gov",
+      "website": "https://www.ssa.gov",
+      "phone": "1-800-772-1213",
+      "source_url": "https://www.ssa.gov/agency/pillars/service.html"
+    },
+    {
+      "key": "medicare",
+      "name": "Medicare",
+      "aliases": [
+        "medicare"
+      ],
+      "kind": "gov",
+      "domain": "medicare.gov",
+      "website": "https://www.medicare.gov",
+      "phone": "1-800-633-4227",
+      "source_url": "https://www.medicare.gov/talk-to-someone"
+    },
+    {
+      "key": "usps",
+      "name": "USPS",
+      "aliases": [
+        "usps",
+        "us postal service",
+        "postal service",
+        "united states postal service",
+        "post office"
+      ],
+      "kind": "gov",
+      "domain": "usps.com",
+      "website": "https://www.usps.com",
+      "phone": "1-800-275-8777",
+      "source_url": "https://es.usps.com/help/contact-us.htm"
+    },
+    {
+      "key": "ftc",
+      "name": "Federal Trade Commission",
+      "aliases": [
+        "ftc",
+        "federal trade commission"
+      ],
+      "kind": "gov",
+      "domain": "ftc.gov",
+      "website": "https://reportfraud.ftc.gov",
+      "phone": "(202) 326-2222",
+      "source_url": "https://www.ftc.gov/about-ftc/contact"
+    },
+    {
+      "key": "fbi",
+      "name": "FBI",
+      "aliases": [
+        "fbi",
+        "federal bureau of investigation"
+      ],
+      "kind": "gov",
+      "domain": "fbi.gov",
+      "website": "https://www.fbi.gov",
+      "phone": "1-800-225-5324",
+      "source_url": "https://www.fbi.gov/investigate/counterintelligence/transnational-repression"
+    },
+    {
+      "key": "uscis",
+      "name": "USCIS",
+      "aliases": [
+        "uscis",
+        "immigration services",
+        "citizenship and immigration"
+      ],
+      "kind": "gov",
+      "domain": "uscis.gov",
+      "website": "https://www.uscis.gov",
+      "phone": "1-800-375-5283",
+      "source_url": "https://www.uscis.gov/contactcenter"
+    },
+    {
+      "key": "marshals",
+      "name": "U.S. Marshals Service",
+      "aliases": [
+        "us marshals",
+        "u s marshals",
+        "marshals service",
+        "marshal service"
+      ],
+      "kind": "gov",
+      "domain": "usmarshals.gov",
+      "website": "https://www.usmarshals.gov",
+      "phone": "(202) 307-9100",
+      "note": "The Marshals never call to demand money for missed jury duty.",
+      "source_url": "https://www.usmarshals.gov/who-we-are/contact-us"
+    },
+    {
+      "key": "ntta",
+      "name": "NTTA (North Texas Tollway Authority)",
+      "aliases": [
+        "ntta",
+        "north texas tollway",
+        "tolltag",
+        "toll tag"
+      ],
+      "kind": "gov",
+      "domain": "ntta.org",
+      "website": "https://www.ntta.org",
+      "phone": "(972) 818-6882",
+      "source_url": "https://www.ntta.org/contact-us"
+    },
+    {
+      "key": "txtag",
+      "name": "TxTag",
+      "aliases": [
+        "txtag",
+        "tx tag"
+      ],
+      "kind": "gov",
+      "domain": "txtag.org",
+      "website": "https://www.txtag.org",
+      "phone": null
+    },
+    {
+      "key": "sunpass",
+      "name": "SunPass",
+      "aliases": [
+        "sunpass",
+        "sun pass"
+      ],
+      "kind": "gov",
+      "domain": "sunpass.com",
+      "website": "https://www.sunpass.com",
+      "phone": "1-888-865-5352",
+      "source_url": "https://www.sunpass.com/en/support/contactus.shtml"
+    },
+    {
+      "key": "fastrak",
+      "name": "FasTrak",
+      "aliases": [
+        "fastrak",
+        "fas trak"
+      ],
+      "kind": "gov",
+      "domain": "bayareafastrak.org",
+      "website": "https://www.bayareafastrak.org",
+      "phone": "1-877-229-8655",
+      "source_url": "https://www.bayareafastrak.org/en/common/docs/handbook.pdf"
+    },
+    {
+      "key": "amazon",
+      "name": "Amazon",
+      "aliases": [
+        "amazon",
+        "amazon prime",
+        "prime video"
+      ],
+      "kind": "business",
+      "domain": "amazon.com",
+      "website": "https://www.amazon.com/gp/help/customer/contact-us",
+      "phone": null
+    },
+    {
+      "key": "apple",
+      "name": "Apple",
+      "aliases": [
+        "apple",
+        "icloud",
+        "apple support",
+        "apple id"
+      ],
+      "kind": "business",
+      "domain": "apple.com",
+      "website": "https://support.apple.com",
+      "phone": "1-800-692-7753",
+      "source_url": "https://www.apple.com/contact"
+    },
+    {
+      "key": "microsoft",
+      "name": "Microsoft",
+      "aliases": [
+        "microsoft",
+        "windows support",
+        "microsoft support"
+      ],
+      "kind": "business",
+      "domain": "microsoft.com",
+      "website": "https://support.microsoft.com",
+      "phone": "1-800-642-7676",
+      "note": "Microsoft never calls you about a virus.",
+      "source_url": "https://support.microsoft.com/en-us/support/"
+    },
+    {
+      "key": "paypal",
+      "name": "PayPal",
+      "aliases": [
+        "paypal",
+        "pay pal"
+      ],
+      "kind": "business",
+      "domain": "paypal.com",
+      "website": "https://www.paypal.com/us/smarthelp/contact-us",
+      "phone": null
+    },
+    {
+      "key": "venmo",
+      "name": "Venmo",
+      "aliases": [
+        "venmo"
+      ],
+      "kind": "business",
+      "domain": "venmo.com",
+      "website": "https://help.venmo.com",
+      "phone": "1-855-812-4430",
+      "source_url": "https://help.venmo.com/hc/en-us/requests/new"
+    },
+    {
+      "key": "cashapp",
+      "name": "Cash App",
+      "aliases": [
+        "cash app",
+        "cashapp",
+        "square cash"
+      ],
+      "kind": "business",
+      "domain": "cash.app",
+      "website": "https://cash.app/help",
+      "phone": "1-800-969-1940",
+      "source_url": "https://cash.app/help/us/en-us/3130-accessing-your-account"
+    },
+    {
+      "key": "zelle",
+      "name": "Zelle",
+      "aliases": [
+        "zelle"
+      ],
+      "kind": "business",
+      "domain": "zellepay.com",
+      "website": "https://www.zellepay.com",
+      "phone": null,
+      "note": "For a Zelle payment, call the bank you sent it from."
+    },
+    {
+      "key": "coinbase",
+      "name": "Coinbase",
+      "aliases": [
+        "coinbase"
+      ],
+      "kind": "business",
+      "domain": "coinbase.com",
+      "website": "https://help.coinbase.com",
+      "phone": "1-888-908-7930",
+      "note": "Coinbase support starts in the app or at help.coinbase.com.",
+      "source_url": "https://help.coinbase.com/coinbase/privacy-and-security/account-compromised/my-account-was-compromised"
+    },
+    {
+      "key": "chase",
+      "name": "Chase",
+      "aliases": [
+        "chase",
+        "jpmorgan chase",
+        "chase bank"
+      ],
+      "kind": "business",
+      "domain": "chase.com",
+      "website": "https://www.chase.com",
+      "phone": "1-800-935-9935",
+      "source_url": "https://www.chase.com/digital/customer-service?jp_cmp=rb/tap/off/na/prt"
+    },
+    {
+      "key": "bofa",
+      "name": "Bank of America",
+      "aliases": [
+        "bank of america",
+        "bofa",
+        "boa"
+      ],
+      "kind": "business",
+      "domain": "bankofamerica.com",
+      "website": "https://www.bankofamerica.com",
+      "phone": "1-800-432-1000",
+      "source_url": "https://www.bankofamerica.com/customer-service/contact-us/checking-savings/"
+    },
+    {
+      "key": "wellsfargo",
+      "name": "Wells Fargo",
+      "aliases": [
+        "wells fargo"
+      ],
+      "kind": "business",
+      "domain": "wellsfargo.com",
+      "website": "https://www.wellsfargo.com",
+      "phone": "1-866-867-5568",
+      "source_url": "https://www.wellsfargo.com/privacy-security/fraud/report"
+    },
+    {
+      "key": "citi",
+      "name": "Citi",
+      "aliases": [
+        "citi",
+        "citibank"
+      ],
+      "kind": "business",
+      "domain": "citi.com",
+      "website": "https://www.citi.com",
+      "phone": "1-800-950-5114",
+      "source_url": "https://www.cardbenefits.citi.com/en/Products/Fraud-Early-Warning"
+    },
+    {
+      "key": "capitalone",
+      "name": "Capital One",
+      "aliases": [
+        "capital one"
+      ],
+      "kind": "business",
+      "domain": "capitalone.com",
+      "website": "https://www.capitalone.com",
+      "phone": "1-800-227-4825",
+      "source_url": "https://www.capitalone.com/contact"
+    },
+    {
+      "key": "tmobile",
+      "name": "T-Mobile",
+      "aliases": [
+        "t mobile",
+        "tmobile",
+        "t-mobile"
+      ],
+      "kind": "business",
+      "domain": "t-mobile.com",
+      "website": "https://www.t-mobile.com/contact-us",
+      "phone": "1-800-937-8997",
+      "note": "From a T-Mobile phone you can also dial 611.",
+      "source_url": "https://www.t-mobile.com/contact-us"
+    },
+    {
+      "key": "verizon",
+      "name": "Verizon",
+      "aliases": [
+        "verizon"
+      ],
+      "kind": "business",
+      "domain": "verizon.com",
+      "website": "https://www.verizon.com/support",
+      "phone": "1-800-922-0204",
+      "source_url": "https://www.verizon.com/support/contact-us"
+    },
+    {
+      "key": "att",
+      "name": "AT&T",
+      "aliases": [
+        "at and t",
+        "att"
+      ],
+      "kind": "business",
+      "domain": "att.com",
+      "website": "https://www.att.com/support",
+      "phone": "1-800-331-0500",
+      "source_url": "https://www.att.com/support/?source=EPcc000000000000U"
+    },
+    {
+      "key": "ups",
+      "name": "UPS",
+      "aliases": [
+        "ups"
+      ],
+      "kind": "business",
+      "domain": "ups.com",
+      "website": "https://www.ups.com",
+      "phone": "1-800-742-5877",
+      "source_url": "https://www.ups.com/us/en/help-center/contact.page"
+    },
+    {
+      "key": "fedex",
+      "name": "FedEx",
+      "aliases": [
+        "fedex",
+        "fed ex"
+      ],
+      "kind": "business",
+      "domain": "fedex.com",
+      "website": "https://www.fedex.com",
+      "phone": "1-800-463-3339",
+      "source_url": "https://www.fedex.com/content/fedex-com/sites/us/en_us/customer-support/contact-us.html"
+    },
+    {
+      "key": "dhl",
+      "name": "DHL",
+      "aliases": [
+        "dhl"
+      ],
+      "kind": "business",
+      "domain": "dhl.com",
+      "website": "https://www.dhl.com/us-en",
+      "phone": "1-800-225-5345",
+      "source_url": "https://www.dhl.com/us-en/home/express/help-and-support/contact-dhl-express.html"
+    },
+    {
+      "key": "netflix",
+      "name": "Netflix",
+      "aliases": [
+        "netflix"
+      ],
+      "kind": "business",
+      "domain": "netflix.com",
+      "website": "https://help.netflix.com",
+      "phone": "1-844-569-7700",
+      "source_url": "https://www.netflix.com/phonenumber"
+    },
+    {
+      "key": "klarna",
+      "name": "Klarna",
+      "aliases": [
+        "klarna"
+      ],
+      "kind": "business",
+      "domain": "klarna.com",
+      "website": "https://www.klarna.com/us/customer-service",
+      "phone": "1-888-518-2771",
+      "source_url": "https://www.klarna.com/us/customer-service"
+    },
+    {
+      "key": "afterpay",
+      "name": "Afterpay",
+      "aliases": [
+        "afterpay",
+        "after pay"
+      ],
+      "kind": "business",
+      "domain": "afterpay.com",
+      "website": "https://help.afterpay.com",
+      "phone": "1-833-844-8095",
+      "source_url": "https://help.afterpay.com/hc/en-us/articles/115000100143-I-am-a-customer-can-I-call-you-and-speak-to-someone"
+    },
+    {
+      "key": "affirm",
+      "name": "Affirm",
+      "aliases": [
+        "affirm"
+      ],
+      "kind": "business",
+      "domain": "affirm.com",
+      "website": "https://helpcenter.affirm.com",
+      "phone": "1-855-423-3729",
+      "source_url": "https://helpcenter.affirm.com/us/s/article/contact-us"
+    },
+    {
+      "key": "walmart",
+      "name": "Walmart",
+      "aliases": [
+        "walmart"
+      ],
+      "kind": "business",
+      "domain": "walmart.com",
+      "website": "https://www.walmart.com/help",
+      "phone": "1-800-925-6278",
+      "source_url": "https://corporate.walmart.com/about/contact"
+    },
+    {
+      "key": "bestbuy",
+      "name": "Best Buy / Geek Squad",
+      "aliases": [
+        "geek squad",
+        "best buy"
+      ],
+      "kind": "business",
+      "domain": "bestbuy.com",
+      "website": "https://www.bestbuy.com/contact-us",
+      "phone": "1-888-237-8289",
+      "source_url": "https://www.bestbuy.com/site/geek-squad/pcmcat138100050018.c?id=pcmcat138100050018"
+    },
+    {
+      "key": "norton",
+      "name": "Norton",
+      "aliases": [
+        "norton",
+        "norton antivirus",
+        "norton 360"
+      ],
+      "kind": "business",
+      "domain": "norton.com",
+      "website": "https://support.norton.com",
+      "phone": null,
+      "note": "Check any renewal by signing in at norton.com yourself."
+    },
+    {
+      "key": "mcafee",
+      "name": "McAfee",
+      "aliases": [
+        "mcafee",
+        "mc afee"
+      ],
+      "kind": "business",
+      "domain": "mcafee.com",
+      "website": "https://www.mcafee.com/support",
+      "phone": "1-866-622-3911",
+      "source_url": "https://www.mcafee.com/support/s/contactsupport?culture=es-pa&id=commonFAQ&language=en_US&news_id=e2f4e0ec-93d7-4f7c-975f-ac458595c58f&tab=license"
+    }
+  ],
+  "resources": [
+    {
+      "key": "ftc_report",
+      "name": "FTC (report a scam)",
+      "website": "https://reportfraud.ftc.gov",
+      "phone": "1-877-382-4357",
+      "use": "report any scam",
+      "source_url": "https://www.ftc.gov/news-events/news/press-releases/2020/10/ftc-announces-new-fraud-reporting-platform-consumers-reportfraudftcgov"
+    },
+    {
+      "key": "elder_fraud",
+      "name": "National Elder Fraud Hotline",
+      "website": "https://ovc.ojp.gov/program/stop-elder-fraud/providing-help-restoring-hope",
+      "phone": "1-833-372-8311",
+      "use": "anyone 60 or older who was scammed: free help from a case manager",
+      "source_url": "https://ovc.ojp.gov/program/stop-elder-fraud/providing-help-restoring-hope"
+    },
+    {
+      "key": "aarp_fraud",
+      "name": "AARP Fraud Watch Network Helpline",
+      "website": "https://www.aarp.org/money/scams-fraud/helpline/",
+      "phone": "1-877-908-3360",
+      "use": "free help talking through a scam, for anyone",
+      "source_url": "https://www.aarp.org/about-aarp/contact-us?intcmp=AE-HP-FTR-CONTACT"
+    },
+    {
+      "key": "ic3",
+      "name": "FBI Internet Crime Complaint Center",
+      "website": "https://www.ic3.gov",
+      "phone": null,
+      "use": "report online fraud, crypto and large losses to the FBI"
+    },
+    {
+      "key": "identity_theft",
+      "name": "IdentityTheft.gov",
+      "website": "https://www.identitytheft.gov",
+      "phone": null,
+      "use": "a free step-by-step plan if someone has your SSN or personal info"
+    },
+    {
+      "key": "spam_7726",
+      "name": "Forward scam texts to 7726",
+      "website": null,
+      "phone": "7726",
+      "use": "forward a scam text to 7726 (SPAM) so your carrier can block it"
+    }
+  ]
+}

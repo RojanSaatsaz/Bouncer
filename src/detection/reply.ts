@@ -10,6 +10,7 @@ import type { ScanResult } from "./scan.js";
 import { voiceNumberForText, textNumberForText } from "../users.js";
 import type { Turn, VerdictMemo } from "../messages/history.js";
 import { caseForModel, type CaseFile } from "../messages/case.js";
+import { RESOURCES } from "../contacts/index.js";
 
 const EMOJI: Record<RiskLevel, string> = { safe: "✅", unsure: "🤔", likely_scam: "⚠️", high_risk: "⚠️" };
 
@@ -227,6 +228,9 @@ const FACTS = [
   "After a Likely scam or High risk verdict, replying REPORT shares an anonymous pattern of that scam (no names, numbers or personal details) to warn people nearby. Texting ZIP and a 5-digit ZIP code (like ZIP 75080) sets the area for local scam alerts.",
   "Privacy: Bouncer doesn't save the messages, screenshots, call audio or call transcripts it checks. Screenshots are read and then dropped. It only keeps the type of check, the risk level and the names of red flags. This chat is remembered for 30 minutes so Bouncer can follow up, then forgotten.",
   "Bouncer is a T-Mobile service. It can't see the user's bank, T-Mobile account, calls or texts unless they send them or merge the call.",
+  "Verified help lines and sites (the only phone numbers you may give, besides active_case.real_contact_verified): " +
+    RESOURCES.map((r) => `${r.name}${r.phone ? ` ${r.phone}` : ""}${r.website ? ` (${r.website.replace(/^https?:\/\//, "")})` : ""}: ${r.use}`).join("; ") +
+    ". For any other company or office, tell them to use the number on their card, statement or the official app, never one from the message.",
 ];
 
 const CHAT_SYSTEM =

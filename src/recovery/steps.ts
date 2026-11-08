@@ -1,6 +1,7 @@
 // SPEC Flow 4 steps 2–3: loss types, the numbered menu and the one-step-per-message checklists.
 // Wording only, no logic. Plain words, sixth-grade reading level.
 import type { JevQuestion } from "../detection/jev.js";
+import { fromDirectory, resource } from "../contacts/index.js";
 
 /** Menu order: "1" = clicked_only … "9" = shared_ssn, "10" = paid_bnpl. */
 export const LOSS_TYPES = [
@@ -148,10 +149,14 @@ export const CHECKLISTS: Record<LossType, Step[]> = {
   ],
 };
 
+// Numbers below come from config/contacts.json (verified on each organization's own site).
+const FTC = resource("ftc_report");
+const ELDER = resource("elder_fraud");
 export const FINAL_STEP: Step = {
   text:
     "If the scam came by text, forward it to 7726 (that spells SPAM) so T-Mobile can block it. " +
-    "Then report it at ReportFraud.ftc.gov.",
+    `Then report it at ReportFraud.ftc.gov${FTC?.phone ? ` or call the FTC at ${FTC.phone}` : ""}.` +
+    (ELDER?.phone ? ` If you're 60 or older, the National Elder Fraud Hotline (${ELDER.phone}) gives free help.` : ""),
 };
 
 /** The loss-specific steps, with the pay-later service filled in ("Klarna", or generic when unknown). */
@@ -163,7 +168,11 @@ export function checklist(loss: LossType, service: string | null = null): Step[]
       .replace("{app}", known ? `the ${service} app` : "the pay-later app you used (Klarna, Afterpay or Affirm)")
       .replace("{Service}", known ? service! : "That service")
       .replace("more {service} payments", known ? `more ${service} payments` : "more of those payments"),
-  }));
+  })).map((s, i) => {
+    // Pay-later step 1: the service's verified phone number, if we have one.
+    const dir = loss === "paid_bnpl" && i === 0 && known ? fromDirectory(service!) : null;
+    return dir?.phone ? { ...s, text: `${s.text} You can also call ${dir.name} at ${dir.phone}.` } : s;
+  });
 }
 
 /** Steps for one loss followed by the final reporting step. */

@@ -49,3 +49,11 @@ Each fact below was checked against the live API or the SDK's generated types, n
 
 - Service `HackUTD-26` deploys from GitHub `RojanSaatsaz/HackUTD-26` (a push to main triggers a deploy). The domain targets port 3000, so the `PORT=3000` variable is pinned to match.
 - Postgres has no public proxy. Locally, run `railway connect Postgres --tunnel-only --port 54329`; `.env` points at `127.0.0.1:54329`. **The tunnel dies whenever the app service redeploys** (it goes through the app container), so rerun it after each deploy.
+
+## OpenRouter web search (verified Nov 8, 2026, ~8 AM)
+
+- Add `plugins: [{ id: "web", engine: "parallel", mode: "fast", max_results: 5, include_domains: [...] }]` to a normal chat-completions request. Results come back in `choices[0].message.annotations[].url_citation` as `{ url, title, content }`, where `content` is about 1.3–1.5 KB of page text.
+- A government-only search uses **`include_domains: [".gov"]`**. Both `"*.gov"` and `"gov"` return **HTTP 500** with the Parallel engine. Exa accepts `"*.gov"` but takes about 2.4 s instead of about 1 s.
+- Cost is about $0.001 per lookup in total (search plus DeepSeek tokens), and it takes about 0.9–1.4 s.
+- Results differ from run to run, so `scripts/verify-contacts.ts` tries each lookup 3 times and keeps a number that was verified on an earlier run.
+

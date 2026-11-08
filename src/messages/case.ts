@@ -30,6 +30,8 @@ export interface CaseFile {
   /** Normalised amounts mentioned, in order ("$5,000"), max 3. */
   amounts: string[];
   durationS: number | null;
+  /** Real contact for the organization it claimed to be (src/contacts, verified), once looked up. */
+  official?: { name: string; website: string; phone: string | null } | null;
   /** One line written in code from the fields above (≤ 200 chars). */
   summary: string;
   at: number;
@@ -53,6 +55,12 @@ export function openCase(userId: string, c: Omit<CaseFile, "summary" | "at">): C
 
 export const getCase = (userId: string): CaseFile | null => cases.get(userId)?.c ?? null;
 
+/** Attaches the verified real contact to the user's active case (no-op without one). */
+export function setCaseContact(userId: string, official: { name: string; website: string; phone: string | null }) {
+  const s = cases.get(userId);
+  if (s) s.c.official = { name: official.name, website: official.website, phone: official.phone };
+}
+
 export function closeCase(userId: string) {
   const s = cases.get(userId);
   if (s) clearTimeout(s.timer);
@@ -70,6 +78,7 @@ export function caseForModel(c: CaseFile) {
     claimed_to_be: c.brand,
     payment_method_mentioned: c.payment?.label ?? null,
     amounts_mentioned: c.amounts,
+    real_contact_verified: c.official ?? null,
     summary: c.summary,
   };
 }

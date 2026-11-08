@@ -23,7 +23,8 @@ import { MESSAGE_QUESTIONS } from "../detection/questions.js";
 import { atLeast, LEVEL_LABEL } from "../detection/risk.js";
 import { writeVerdictReply, answerChat, pickFresh, topFlags, type ChatKind } from "../detection/reply.js";
 import { addUserTurn, addBouncerTurn, getHistory, setVerdict } from "./history.js";
-import { getCase, openCase, caseForModel, detectPayment, detectAmounts } from "./case.js";
+import { getCase, openCase, caseForModel, detectPayment, detectAmounts, setCaseContact } from "./case.js";
+import { findOfficialContact, contactLine, orgFromMessage, looksGovernment } from "../contacts/index.js";
 
 const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
 
@@ -463,4 +464,34 @@ async function reply(
   await updateContactMemory(user.id, sender, scan.risk).catch((err) =>
     console.error(`[inbound] contact memory update failed: ${err?.message}`),
   );
+  await sendOfficialContact(user.id, say, scan, body, claimedBrand);
+}
+
+/**
+ * After an Unsure-or-worse verdict: the real phone number and website of whoever the message claims to be,
+ * so the user can check without searching. Verified directory first (instant); otherwise a live search
+ * that only accepts .gov sites for government and the brand's own domain for companies (src/contacts).
+ * A separate message after the verdict, so the 6 s verdict target is untouched.
+ */
+async function sendOfficialContact(userId: string, say: Say, scan: ScanResult, body: string, claimedBrand: string | null) {
+  if (!atLeast(scan.risk.level, "unsure")) return;
+  const t0 = Date.now();
+  try {
+    let org = claimedBrand;
+    let hint: string | null = null;
+    // Pasted texts have no extracted brand; government offices need the state/city to find the right one.
+    if (!org || looksGovernment(org, scan.scamType)) {
+      const x = await orgFromMessage(body);
+      org = org ?? x.org;
+      hint = x.hint;
+    }
+    if (!org) return;
+    const c = await findOfficialContact(org, { scamType: scan.scamType, hint, timeoutMs: 5_000 });
+    console.log(`[inbound] official contact: ${c ? `${c.source}${c.phone ? "+phone" : ""}` : "none"} in ${Date.now() - t0} ms`);
+    if (!c) return;
+    setCaseContact(userId, c);
+    await say([contactLine(c)], "contact");
+  } catch (err: any) {
+    console.warn(`[inbound] official contact failed: ${err?.message}`);
+  }
 }

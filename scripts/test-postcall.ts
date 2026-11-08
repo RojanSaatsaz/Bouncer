@@ -108,7 +108,11 @@ async function endAndCheck(
   const text = texts.find((t) => t.startsWith("📞 Call summary") || t.startsWith("Call ended")) ?? texts[0] ?? "";
   const meta = logs.slice(mark).find((l) => l.includes("summary=")) ?? "";
   console.log(`\n----- ${name} (${ms} ms end to end; ${meta.replace(/^.*summary=/, "summary=")}) -----\n${text}\n-----`);
-  check(`${name}: one summary text`, texts.length === 1 && !!text, `${texts.length} texts`);
+  // One summary text; when the caller claimed a known company or agency, a verified real-contact line follows it.
+  const extra = texts.filter((t) => t !== text);
+  check(`${name}: one summary text`, !!text && texts.filter((t) => t.startsWith("📞 Call summary") || t.startsWith("Call ended")).length === 1, `${texts.length} texts`);
+  check(`${name}: anything else is one real-contact line`, extra.length === 0 || (extra.length === 1 && /^📞 To check with the real .*the caller gave you\.$/.test(extra[0])), extra.join(" | "));
+  if (extra[0]) console.log(`      + ${extra[0]}`);
   check(`${name}: length ≤ ${SUMMARY_MAX_CHARS}`, text.length <= SUMMARY_MAX_CHARS, `${text.length}`);
   check(`${name}: no safe word`, !leaks(text));
   check(`${name}: safe word / transcript never logged`, !logs.slice(mark).some((l) => leaks(l) && !l.includes("dry-run")));
