@@ -7,6 +7,8 @@ import { startFamilyEmergency } from "../family/index.js";
 import { toE164, getUserByVoicePhone, getListenPendingUser, clearListenPending, textUser } from "../users.js";
 import { CALL_QUESTIONS, CALL_FLAGS } from "./questions.js";
 import type { CallSession } from "./session.js";
+import { loadSafeWord, writeAlertLines } from "./summary.js";
+import { redactSafeWord } from "./talk.js";
 
 /** How long the turns must stay unchanged before Jev scores them (speculative / revised turns). */
 export const SCORE_DEBOUNCE_MS = Number(process.env.CALL_SCORE_DEBOUNCE_MS) || 1200;
@@ -52,6 +54,8 @@ export function scheduleScore(s: CallSession) {
 
 const inFlight = new WeakMap<CallSession, Promise<void>>();
 const alertChain = new WeakMap<CallSession, Promise<void>>();
+/** Tests: resolves once this session's queued alert texts are sent. */
+export const alertsSettled = (s: CallSession): Promise<void> => alertChain.get(s) ?? Promise.resolve();
 
 /**
  * Talk mode: make sure the level is fresh before Bouncer speaks (Jev decides, Gemini only words it).
@@ -160,7 +164,10 @@ export function textGateOpen(s: { level: RiskLevel; flags: Set<string> }, streak
   return CONCRETE_ASKS.some((f) => s.flags.has(f)) || streak >= LIKELY_STREAK_MIN;
 }
 
-/** Alert lines (SPEC step 6), in priority order. Each flag is texted at most once per call. */
+/**
+ * Fixed alert lines (SPEC step 6), in priority order. Each flag is texted at most once per call. The model
+ * normally words a call-specific line instead (summary.ts writeAlertLines); these are the fallback.
+ */
 const FLAG_LINES: Record<string, (brand: string | null) => string> = {
   asks_code: () => "⚠️ High risk: hang up. Never read a code to someone who called you.",
   remote_access: () => "⚠️ High risk: don't install anything. Hang up.",
@@ -176,6 +183,25 @@ const LEVEL_LINES: Partial<Record<RiskLevel, string>> = {
   likely_scam: "⚠️ Likely scam: this call matches a known scam pattern. Hang up and call the company on a number you trust.",
   high_risk: "⚠️ High risk: hang up now. This call matches a known scam pattern.",
 };
+
+/**
+ * Alert texts actually sent on this call, in order (memory only: the object dies with the session).
+ * The next alert's wording avoids repeating them, and the post-call summary lists them.
+ */
+const sentAlerts = new WeakMap<CallSession, string[]>();
+export const alertTexts = (s: CallSession): string[] => [...(sentAlerts.get(s) ?? [])];
+
+/** Per call: the circle's safe word (decrypted on use only), so alert wording never sees it (rule 2). */
+const safeWords = new WeakMap<CallSession, Promise<string | null>>();
+function safeWordFor(s: CallSession, userId: string): Promise<string | null> {
+  let p = safeWords.get(s);
+  if (!p) {
+    p = loadSafeWord(userId);
+    p.catch(() => safeWords.delete(s)); // retry on the next alert
+    safeWords.set(s, p);
+  }
+  return p;
+}
 
 async function alert(s: CallSession, transcript: string, streak: number) {
   const userId = s.userId;
@@ -197,7 +223,12 @@ async function alert(s: CallSession, transcript: string, streak: number) {
   const send = async (key: string, line: string) => {
     try {
       const ok = await textUser(userId, [line], `call:${s.conv}:${key}`);
-      if (ok) s.alertCount++;
+      if (ok) {
+        s.alertCount++;
+        const list = sentAlerts.get(s) ?? [];
+        list.push(line);
+        sentAlerts.set(s, list);
+      }
       return ok;
     } catch (err: any) {
       console.error(`[listen] alert ${key} failed: ${err?.message}`);
@@ -205,36 +236,72 @@ async function alert(s: CallSession, transcript: string, streak: number) {
     }
   };
 
+  if (s.ended) return;
+  const pending = Object.keys(FLAG_LINES).filter((f) => s.flags.has(f) && !s.alerted.has(f));
+  for (const f of pending) s.alerted.add(f); // mark before sending so a rerun never doubles it
+  const level = s.level;
+  const levelUp = LEVEL_ORDER.indexOf(level) > LEVEL_ORDER.indexOf(s.alertedLevel) && !!LEVEL_LINES[level];
+
+  // Wording (call-specific, ~1 s) and the brand for the fixed impersonation line run side by side.
+  const keys = [...pending, ...(levelUp && !pending.length ? ["level"] : [])];
+  const [brand, words] = await Promise.all([
+    pending.includes("impersonation") ? brandFrom(transcript, s, userId) : Promise.resolve(null),
+    wordAlerts(s, userId, keys, level, transcript),
+  ]);
+
   let sentFlagLine = false;
-  for (const f of Object.keys(FLAG_LINES)) {
-    if (!s.flags.has(f) || s.alerted.has(f) || s.ended) continue;
-    s.alerted.add(f); // mark before sending so a rerun never doubles it
-    const brand = f === "impersonation" ? await brandFrom(transcript) : null;
+  for (const f of pending) {
+    if (s.ended) {
+      s.alerted.delete(f); // never texted
+      continue;
+    }
     // Pretending to be a relative, not a company: Flow 3's coaching text covers it.
     if (f === "impersonation" && !brand && s.flags.has("family_danger")) continue;
-    if (await send(f, FLAG_LINES[f](brand))) sentFlagLine = true;
+    if (await send(f, words[f] ?? FLAG_LINES[f](brand))) sentFlagLine = true;
   }
   // urgency_secrecy has no line of its own; it still counts as a red flag in the call summary.
   if (s.flags.has("urgency_secrecy")) s.alerted.add("urgency_secrecy");
 
   // Level went up since the last text: say so, unless a flag line just said it.
-  if (LEVEL_ORDER.indexOf(s.level) > LEVEL_ORDER.indexOf(s.alertedLevel)) {
-    const level = s.level;
+  if (LEVEL_ORDER.indexOf(level) > LEVEL_ORDER.indexOf(s.alertedLevel)) {
     s.alertedLevel = level;
-    if (!sentFlagLine && LEVEL_LINES[level]) await send(`level:${level}`, LEVEL_LINES[level]!);
+    if (!sentFlagLine && LEVEL_LINES[level] && !s.ended) await send(`level:${level}`, words.level ?? LEVEL_LINES[level]!);
   }
 }
 
-/** Gemini (fast tier) names the company or agency the caller claims to be. Wording only; Jev already decided. */
-async function brandFrom(transcript: string): Promise<string | null> {
+/** Call-specific alert lines from the model; {} (→ fixed lines) on any failure. Logs key names and timing only. */
+async function wordAlerts(
+  s: CallSession,
+  userId: string,
+  keys: string[],
+  level: RiskLevel,
+  transcript: string,
+): Promise<Record<string, string>> {
+  if (!keys.length) return {};
+  let secret: string | null;
   try {
+    secret = await safeWordFor(s, userId);
+  } catch {
+    return {}; // fail closed: no model call without redaction (rule 2)
+  }
+  const r = await writeAlertLines({ keys, level, transcript, previous: alertTexts(s), secret });
+  console.log(
+    `[listen] conv=${short(s.conv)} alert wording keys=[${keys.join(",")}] model=[${Object.keys(r.lines).join(",")}] ${r.ms}ms${r.reason ? ` (${r.reason})` : ""}`,
+  );
+  return r.lines;
+}
+
+/** Gemini (fast tier) names the company or agency the caller claims to be. Wording only; Jev already decided. */
+async function brandFrom(transcript: string, s: CallSession, userId: string): Promise<string | null> {
+  try {
+    const secret = await safeWordFor(s, userId); // throws → caught below → no brand (rule 2)
     const out = await generateJson<{ brand: string | null }>({
       tier: "fast",
       system:
         "You read a phone call transcript. Return the short name of the company or government agency the caller " +
         "claims to represent, without 'the' (for example 'Chase', 'IRS', 'Amazon', 'T-Mobile'). Return null if it is a relative, " +
         "a friend, a person without an organization, or unclear.",
-      parts: [{ text: transcript.slice(-6000) }],
+      parts: [{ text: redactSafeWord(transcript, secret).slice(-6000) }],
       jsonSchema: { type: "object", properties: { brand: { type: "string", nullable: true } }, required: ["brand"] },
       temperature: 0,
       timeoutMs: 4000,

@@ -195,7 +195,7 @@ export async function writeVerdictReply(
       ],
       jsonSchema: VERDICT_SCHEMA,
       temperature: 0.6,
-      presencePenalty: 0.4,
+      presencePenalty: 0.2,
       timeoutMs: Math.min(3_000, left),
       noFallback: true,
     });
@@ -422,8 +422,8 @@ export async function answerChat(text: string, ctx: ChatContext): Promise<string
         system: CHAT_SYSTEM,
         parts: [{ text: prompt }],
         temperature: 0.8,
-        presencePenalty: 0.6, // user feedback: too many repeated phrases
-        frequencyPenalty: 0.4,
+        presencePenalty: 0.2, // variety; 0.5+ made DeepSeek glue words together (measured)
+        frequencyPenalty: 0.1,
         maxOutputTokens: 300,
         timeoutMs: Math.min(3_000, left),
         noFallback: true,

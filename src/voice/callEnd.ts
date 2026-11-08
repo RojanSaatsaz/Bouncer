@@ -2,12 +2,13 @@
 // after the signature check. Never logs payload content: only type, agent and a conversation id prefix.
 import { config } from "../config.js";
 import { query } from "../db.js";
-import { endSession } from "./session.js";
+import { endSession, peekSession } from "./session.js";
 import { onVerifyCallEnded } from "../family/index.js";
 import { setPending, registerPendingHandler } from "../pending.js";
 import { getUserById, textUser } from "../users.js";
 import { logEvent } from "../detection/scan.js";
-import { FLAG_LABELS } from "../detection/questions.js";
+import { alertTexts } from "./score.js";
+import { writeCallSummary } from "./summary.js";
 
 /** Fields we read from the webhook body. Shapes per https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks */
 export interface PostCallEvent {
@@ -40,8 +41,27 @@ export async function onCallEnded(evt: PostCallEvent): Promise<void> {
   }
 
   // Listen agent (or an unknown agent: sessions only exist for Listen calls, so this is a no-op then).
-  const s = endSession(conv); // rule 1: turn text is dropped here
-  if (!s || !s.userId || s.userId === "unknown") return;
+  // endSession() clears Bouncer's spoken replies: copy them first for the summary (memory only, rule 1).
+  const replies = new Map(peekSession(conv)?.replies ?? []);
+  const s = endSession(conv);
+  if (!s) return;
+  try {
+    await finishListenCall(s, type, evt, replies);
+  } finally {
+    // Rule 1: the transcript existed only for the summary; drop it now (the object is garbage soon anyway).
+    s.turns.length = 0;
+    replies.clear();
+  }
+}
+
+async function finishListenCall(
+  s: NonNullable<ReturnType<typeof endSession>>,
+  type: string,
+  evt: PostCallEvent,
+  replies: Map<number, string>,
+): Promise<void> {
+  const conv = s.conv;
+  if (!s.userId || s.userId === "unknown") return;
   if (type === "call_initiation_failure") return; // inbound calls never get here; nothing to summarize
 
   const flags = [...s.alerted];
@@ -69,18 +89,32 @@ export async function onCallEnded(evt: PostCallEvent): Promise<void> {
   }
 
   const keyPrefix = `bouncer:postcall:${conv}`;
-  if (flags.length === 0) {
-    await textUser(s.userId, ["Call ended. I didn't hear any scam signs."], keyPrefix);
-    return;
-  }
-
-  const n = flags.length;
-  const list = flags.map((f) => FLAG_LABELS[f] ?? f.replace(/_/g, " ")).join("; ");
-  const summary = `Call summary: Bouncer spotted ${n} red flag${n === 1 ? "" : "s"}: ${list}.`;
-  // ifFree: never overwrite a live action (e.g. "Reply YES and I'll call Jake"). If the slot is taken,
-  // don't ask the question either, or the user's YES would go to the other action.
-  const asked = eventId ? setPending(s.userId, "call_feedback", { eventId }, 5 * 60_000, { ifFree: true }) : false;
-  await textUser(s.userId, [asked ? `${summary} Was it a scam? Reply YES or NO.` : summary], keyPrefix);
+  // The question only when there were red flags and the slot is free: never overwrite a live action
+  // (e.g. "Reply YES and I'll call Jake"), or the user's YES would go to the other action.
+  const asked =
+    flags.length > 0 && eventId ? setPending(s.userId, "call_feedback", { eventId }, 5 * 60_000, { ifFree: true }) : false;
+  const talkUsed = s.botTurns.size > 0 || replies.size > 0;
+  const summary = await writeCallSummary(
+    {
+      level: s.level,
+      p: s.p,
+      scamType: s.scamType,
+      alerted: flags,
+      crossed: [...s.flags],
+      probs: { ...s.probs },
+      alertsSent: alertTexts(s),
+      durationS,
+      talkUsed,
+      askFeedback: asked,
+    },
+    { turns: s.turns, botTurns: s.botTurns, replies },
+    s.userId,
+  );
+  // Names and timings only, never the text (rule 1).
+  console.log(
+    `[post-call] conv=${short(conv)} summary=${summary.source}${summary.reason ? ` (${summary.reason})` : ""} chars=${summary.text.length} ${summary.ms}ms asked=${asked}`,
+  );
+  await textUser(s.userId, [summary.text], keyPrefix);
 }
 
 // Always handled (returns true): the feedback row is stored and the user gets a thank-you text.
