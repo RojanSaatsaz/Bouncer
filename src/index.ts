@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { timingSafeEqual } from "node:crypto";
 import { config } from "./config.js";
 import { pool } from "./db.js";
+import { ensureSchema } from "./schema.js";
 import { startPhotonSocket, stopPhotonSocket } from "./photon/socket.js";
 import { handleInbound } from "./messages/inbound.js";
 import { handleChatCompletions } from "./voice/llm.js";
@@ -41,6 +42,7 @@ serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, (info) => {
 // Safety net: a stray rejected promise in background work (Jev/Gemini/DB) must not take the server down mid-demo.
 process.on("unhandledRejection", (err: any) => console.error("[process] unhandled rejection:", err?.message ?? err));
 
+void ensureSchema(pool);
 startPhotonSocket(handleInbound);
 
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
