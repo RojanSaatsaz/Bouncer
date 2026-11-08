@@ -7,6 +7,7 @@ import { startFamilyEmergency } from "../family/index.js";
 import { toE164, getUserByVoicePhone, getListenPendingUser, clearListenPending, textUser } from "../users.js";
 import { CALL_QUESTIONS, CALL_FLAGS } from "./questions.js";
 import type { CallSession } from "./session.js";
+import { WAKE_ANY } from "./wake.js";
 import { loadSafeWord, writeAlertLines } from "./summary.js";
 import { redactSafeWord } from "./talk.js";
 
@@ -144,7 +145,6 @@ export function callerTranscript(s: CallSession): string {
     .filter((t) => t?.trim())
     .join("\n");
 }
-const WAKE_ANY = /\b(hey|hi|ok(ay)?|thanks?|thank you)[,.!]?\s+(bouncer|bouncers|bounce her)\b/i;
 
 /** Flags that mean someone on the call actually asked for something (impersonation + urgency alone isn't). */
 const CONCRETE_ASKS = ["asks_code", "remote_access", "money_or_code"];

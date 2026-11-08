@@ -2,7 +2,7 @@
 //
 //   npm run test:call                    # spawns its own server on PORT (default 3102) with DRY_RUN=1, PHOTON_SOCKET=off
 //   npm run test:call -- --no-spawn      # use a server you already started on PORT (alert checks become INFO)
-//   npm run test:call -- a c             # run only some scenarios (a b c d e f g h i j k l m)
+//   npm run test:call -- a c             # run only some scenarios (a … q)
 //
 // DATABASE_URL must point at a LOCAL database: the runner creates a throwaway user whose voice_phone is the
 // fake caller (so dry-run alerts print) and deletes it at the end. Remote DBs are refused.
@@ -17,7 +17,7 @@ const CALLER = "+12145550123"; // valid US format, fictional 555-01xx number
 const SECRET = process.env.BOUNCER_LLM_SECRET ?? "";
 const args = process.argv.slice(2);
 const noSpawn = args.includes("--no-spawn");
-const only = args.filter((a) => /^[a-m]$/.test(a));
+const only = args.filter((a) => /^[a-q]$/.test(a));
 const run = (k: string) => only.length === 0 || only.includes(k);
 const SETTLE_MS = 7000; // debounce (1.2 s) + Jev + Gemini brand + dry-run sends
 // Talk-mode idle timeout for the spawned server: shorter than the 28 s default so (m) runs quickly.
@@ -222,7 +222,8 @@ async function scenarioA() {
     const alerts = alertsSince(mark);
     alerts.forEach((l) => console.log(`    alert: ${l.replace(/.*\]\s*/, "")}`));
     check("(a) at least one alert texted", alerts.length > 0, `${alerts.length} alert(s)`);
-    check("(a) asks_code alert sent", alerts.some((l) => /Never read a code/.test(l)));
+    // Was /Never read a code/: alert lines are now worded per call (score.ts), so check the meaning.
+    check("(a) asks_code alert sent", alerts.some((l) => /High risk/i.test(l) && /\bcode\b/i.test(l)));
     const dupes = alerts.length - new Set(alerts).size;
     check("(a) no duplicate alert lines", dupes === 0, `${dupes} duplicate(s)`);
     check("(a) server never logged turn text", !serverLog.some((l) => /[Cc]hase fraud|six digit code/.test(l) && !/dry-run/.test(l)));
@@ -605,6 +606,143 @@ async function scenarioM() {
   check("(m) \"Bouncer, …\" (name first) → talking again", back.kind === "speak", back.kind);
 }
 
+/** Words that would mean Bouncer reported on "this call" instead of answering about the user's story. */
+const CALL_STATUS = /\b(on|about|during) (this|the) call\b|haven'?t heard|so far on|listening (to|on) (this|the) call/i;
+const VERDICT = /\bknown scam pattern\b|\bthat('| i)?s an? (\w+ ){0,2}scam\b|\d+ ?(%|percent)|\bit (is|'s) (definitely )?a scam\b|\bthis is (definitely )?a scam\b/i;
+
+async function scenarioN() {
+  console.log("\n== (n) direct 1-on-1 call: advice about what happened, not a status report on this call ==");
+  const conv = `tcN_${Date.now()}`;
+  const c = conversation(conv);
+  const pre = await c.say("Hello?");
+  const story = await c.say(
+    "Hi Bouncer, so this happened today, someone texted me saying my Amazon account was locked and I had to call a number, " +
+      "and when I called they wanted me to buy gift cards to unlock it. What should I do?",
+    1200,
+  );
+  const bank = await c.say("Should I call my bank?", 1200);
+  const gave = await c.say("What if I already gave them a card number?", 1200);
+  c.print();
+  check("(n) silent before the wake (\"Hello?\")", pre.kind === "skip", pre.kind);
+  if (server) check("(n) server derived a direct call", logSince(0, new RegExp(`conv=${conv.slice(0, 10)} call context → direct`)).length > 0);
+  check("(n) story gets a spoken answer", story.kind === "speak" && story.done, story.kind);
+  check("(n) answer is about the gift-card story", /gift ?card|amazon|number|app|website/i.test(story.text), story.text);
+  check("(n) no status report about this call", ![story, bank, gave].some((r) => CALL_STATUS.test(r.text)), [story, bank, gave].map((r) => r.text).join(" | "));
+  check("(n) no verdict / percentage / 'known scam pattern'", ![story, bank, gave].some((r) => VERDICT.test(r.text)));
+  check("(n) \"should I call my bank?\" answered", bank.kind === "speak" && /bank|card|number/i.test(bank.text), bank.text);
+  check("(n) \"what if I already gave them a card number?\" answered", gave.kind === "speak" && /card|bank|block|cancel|freeze|steps|text/i.test(gave.text), gave.text);
+  check("(n) ≤ 4 sentences, < 70 words each", [story, bank, gave].every((r) => sentenceCount(r.text) <= 4 && stripFiller(r.text).split(/\s+/).length < 70),
+    [story, bank, gave].map((r) => `${sentenceCount(r.text)}s/${stripFiller(r.text).split(/\s+/).length}w`).join(","));
+  const firsts = [story, bank, gave].map((r) => r.firstContentMs ?? 1e9);
+  check("(n) < 2 s to first audio", Math.max(...firsts) < 2000, firsts.join(","));
+}
+
+async function scenarioO() {
+  console.log("\n== (o) merged call: scammer talks, then \"Hello Bouncer, is this real?\" → call-focused answer ==");
+  const conv = `tcO_${Date.now()}`;
+  const c = conversation(conv);
+  for (const t of SCAM) await c.say(t, 1500);
+  await sleep(SETTLE_MS);
+  const real = await c.say("Hello Bouncer, is this real?", 1200);
+  const vague = await c.say("Bouncer, what do you think?", 1200);
+  c.print();
+  const level = levelOf(conv);
+  check("(o) scammer turns → silent", c.log.slice(0, SCAM.length).every((x) => x.r.kind === "skip"));
+  if (server) check("(o) server derived a merged call", logSince(0, new RegExp(`conv=${conv.slice(0, 10)} call context → merged`)).length > 0);
+  check("(o) \"Hello Bouncer, is this real?\" wakes and answers", real.kind === "speak" && real.done, real.kind);
+  if (level === "likely_scam" || level === "high_risk")
+    check("(o) call-focused: known scam pattern (level Likely+)", /known scam pattern/i.test(real.text), `level=${level}`);
+  else check("(o) call-focused answer", /call|code|hang up|bank|chase/i.test(real.text) ? true : null, `level=${level}`);
+  check("(o) vague \"what do you think?\" → read on the call", vague.kind === "speak" && /call|code|hang|scam|bank|chase|caller|share/i.test(vague.text), vague.text);
+}
+
+async function scenarioP() {
+  console.log("\n== (p) wake variants: greetings + name, name anywhere in a question/request; incidental mentions stay silent ==");
+  const { wakeCue } = await import("../src/voice/talk.js");
+  const WAKES = [
+    "Hey Bouncer, what do you think?",
+    "Hi Bouncer.",
+    "Hello Bouncer, are you there?",
+    "Yo Bouncer, you there?",
+    "Okay Bouncer, is this a scam?",
+    "Hiya Bouncer.",
+    "Good morning, Bouncer.",
+    "Hey there Bouncer.",
+    "Bouncer, what's your opinion?",
+    "Was that a scam, Bouncer?",
+    "Bouncer do you wanna pitch in?",
+    "Bouncer, help",
+    "okay Bouncer is this a scam",
+    "What do you say Bouncer",
+    "hey bounce her, you there?",
+    "Hey Bouncers, what do you think?",
+    "What do you think, bounce her?",
+  ];
+  const SILENT = [
+    "The bouncer at the club wouldn't let us in.",
+    "My cousin works as a bouncer downtown.",
+    "I told him the bouncers there were rude.",
+  ];
+  for (const t of WAKES) check(`(p) wakeCue wakes: "${t}"`, wakeCue(t) === "wake", String(wakeCue(t)));
+  for (const t of SILENT) check(`(p) wakeCue silent: "${t}"`, wakeCue(t) === null, String(wakeCue(t)));
+  // Live: each phrasing wakes a fresh call; incidental mentions on a call stay silent (and a later wake still works).
+  const live = await Promise.all(WAKES.map((t, i) => turn(`tcP${i}_${Date.now()}`, ["Hello?", t])));
+  live.forEach((r, i) => console.log(`    ${JSON.stringify(WAKES[i])} → ${fmt(r)}`));
+  const missed = live.map((r, i) => (r.kind === "speak" ? null : WAKES[i])).filter(Boolean);
+  check("(p) live: every phrasing gets a spoken reply", missed.length === 0, missed.join(" | ") || `${live.length} woke`);
+  const conv = `tcPs_${Date.now()}`;
+  const turns = ["Hi, sorry, I was out last night."];
+  const silent: TurnResult[] = [];
+  for (const t of [...SILENT, "Did you see the bouncer at the club?"]) {
+    turns.push(t);
+    silent.push(await turn(conv, turns));
+  }
+  silent.forEach((r, i) => console.log(`    ${JSON.stringify(turns[i + 1])} → ${fmt(r)}`));
+  check("(p) live: incidental mentions → skip_turn", silent.every((r) => r.kind === "skip"), silent.map((r) => r.kind).join(","));
+  check("(p) live: ambiguous mention waits ≤ ~0.8 s for Jev", silent[silent.length - 1].totalMs < 1000, `${silent[silent.length - 1].totalMs} ms`);
+}
+
+async function scenarioQ() {
+  console.log("\n== (q) variety: 6 replies, no two open with the same 3 words, no repeated sentence ==");
+  const { withoutGarble } = await import("../src/voice/talk.js");
+  const drain = async (pieces: string[]) => {
+    let out = "";
+    try {
+      for await (const p of withoutGarble((async function* () { yield* pieces; })())) out += p;
+      return { out, threw: false };
+    } catch {
+      return { out, threw: true };
+    }
+  };
+  const okRun = await drain(["Hang up and ", "call the num", "ber on your card."]);
+  check("(q) garble guard: normal reply passes unchanged", !okRun.threw && okRun.out === "Hang up and call the number on your card.", okRun.out);
+  const bad = await drain(["Don't pay. That push ", "stopsyoufromcheckingwithyourbank", " yourself."]);
+  check("(q) garble guard: glued words stop the reply", bad.threw && !/stopsyou/.test(bad.out), bad.out);
+  const c = conversation(`tcQ_${Date.now()}`);
+  const rs: TurnResult[] = [];
+  for (const t of [
+    "Hey Bouncer, how are you doing today?",
+    "What kind of things do you help with?",
+    "I got a text saying my package is held and I need to pay a small fee. What do you think?",
+    "How can I tell if a text like that is real?",
+    "What about calls saying they're from the IRS?",
+    "Any tips for keeping my mom safe from this stuff?",
+  ])
+    rs.push(await c.say(t, 1000));
+  c.print();
+  const spoken = rs.filter((r) => r.kind === "speak");
+  check("(q) all 6 answered", spoken.length === 6, `${spoken.length}`);
+  const opens = spoken.map((r) => norm(r.text).split(" ").slice(0, 3).join(" "));
+  const dupOpen = opens.filter((o, i) => opens.indexOf(o) !== i);
+  check("(q) no two replies open with the same 3 words", dupOpen.length === 0, opens.join(" | "));
+  const sents = spoken.flatMap((r) => stripFiller(r.text).split(/(?<=[.!?])\s+/).map((x) => norm(x)).filter((x) => x.split(" ").length >= 4));
+  const dupSent = sents.filter((x, i) => sents.indexOf(x) !== i);
+  check("(q) no sentence repeated across replies", dupSent.length === 0, dupSent.join(" | "));
+  check("(q) no banned stock phrases", !spoken.some((r) => /haven'?t heard (any )?clear|keeping an ear on|great question|rest assured|i understand your concern/i.test(r.text)));
+  const firsts = spoken.map((r) => r.firstContentMs ?? 1e9);
+  check("(q) < 2 s to first audio", Math.max(...firsts) < 2000, `max ${Math.max(...firsts)} ms, median ${firsts.sort((a, b) => a - b)[3]} ms`);
+}
+
 // ---- main -----------------------------------------------------------------------------------------
 async function main() {
   if (!SECRET) throw new Error("BOUNCER_LLM_SECRET is not set (npm run test:call loads .env)");
@@ -624,6 +762,10 @@ async function main() {
   if (run("k")) await scenarioK();
   if (run("l")) await scenarioL();
   if (run("m")) await scenarioM();
+  if (run("n")) await scenarioN();
+  if (run("o")) await scenarioO();
+  if (run("p")) await scenarioP();
+  if (run("q")) await scenarioQ();
   const failed = results.filter((r) => r.ok === false);
   console.log(`\n${results.filter((r) => r.ok).length} passed, ${failed.length} failed, ${results.filter((r) => r.ok === null).length} info`);
   failed.forEach((f) => console.log(`FAIL  ${f.name}  ${f.detail}`));

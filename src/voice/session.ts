@@ -63,6 +63,16 @@ export interface CallSession {
   lastSignOff: string | null;
   /** Turn indexes spoken to Bouncer (wake, thanks, follow-ups): left out of what Jev scores. */
   botTurns: Set<number>;
+  /** Index of the first wake turn this call (-1 until someone says "Hey Bouncer"). */
+  firstWakeTurn: number;
+  /**
+   * Who Bouncer is talking to, derived in code (talk.ts callContext): "direct" = the user called Bouncer
+   * 1-on-1 (no other speech before the first wake), "merged" = Bouncer is on a live call with someone else.
+   * null until the first wake. Once "merged", it stays merged.
+   */
+  callContext: "direct" | "merged" | null;
+  /** Last few canned lines spoken (fillers, sign-offs, fallbacks), so none comes back too soon. */
+  recentLines: string[];
   ended: boolean;
 }
 
@@ -111,6 +121,9 @@ export function getOrCreateSession(conv: string): CallSession {
       lastFiller: null,
       lastSignOff: null,
       botTurns: new Set(),
+      firstWakeTurn: -1,
+      callContext: null,
+      recentLines: [],
       ended: false,
     };
     sessions.set(conv, s);

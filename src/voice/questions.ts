@@ -49,6 +49,20 @@ export const ADDRESSED_QUESTION: Record<string, JevQuestion> = {
 };
 
 /**
+ * Wake tie-breaker (listening mode): the turn mentions "Bouncer" but its form is ambiguous (wake.ts
+ * wakeCue → "maybe"). Is the speaker talking TO the assistant, or just mentioning a bouncer?
+ */
+export const WAKE_QUESTION: Record<string, JevQuestion> = {
+  speaks_to_bouncer: {
+    type: "noul",
+    instructions:
+      "In the latest turn, the speaker is talking to the AI assistant named Bouncer (asking it something, asking for " +
+      "its opinion or help, or greeting it), rather than just mentioning a bouncer (such as a doorman at a club) or a " +
+      "pet or person called Bouncer while talking to someone else.",
+  },
+};
+
+/**
  * Step 9 helper: the user asked Bouncer, out loud, to check on a relative. Nothing happens from voice
  * alone (rule 4): this only starts Flow 3, which texts "Reply YES and I'll call …" first.
  */

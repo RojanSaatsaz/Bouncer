@@ -6,7 +6,7 @@ import { skipTurnResponse, parseSystemVars, messageText } from "./sse.js";
 import { handleVerifyTurn } from "../family/index.js";
 import { getOrCreateSession, isEnded, type CallSession } from "./session.js";
 import { identify, scheduleScore } from "./score.js";
-import { maybeTalk, isWake, isSignOff } from "./talk.js";
+import { maybeTalk, wakeCue, isSignOff } from "./talk.js";
 
 export async function handleChatCompletions(c: Context, body: any): Promise<Response> {
   const t0 = Date.now();
@@ -35,17 +35,19 @@ export async function handleChatCompletions(c: Context, body: any): Promise<Resp
   const idx = userTexts.length - 1;
   if (idx < 0) return skipTurnResponse("bouncer-listen");
   const last = userTexts[idx];
-  const wake = isWake(last);
+  // "wake": addressed to Bouncer by name; "maybe": the name, ambiguously (Jev decides in maybeTalk).
+  const cue = wakeCue(last);
+  const wake = cue === "wake";
   const signOff = isSignOff(last);
   if (wake || signOff) s.botTurns.add(idx);
   if (updateTurns(s, userTexts)) scheduleScore(s);
   rememberSpokenReplies(s, messages);
 
   console.log(
-    `[listen] turn conv=${conv.slice(0, 10)} idx=${idx} mode=${s.mode} len=${last.length}${wake ? " wake" : ""}${signOff ? " sign-off" : ""}`,
+    `[listen] turn conv=${conv.slice(0, 10)} idx=${idx} mode=${s.mode} len=${last.length}${wake ? " wake" : cue === "maybe" ? " name?" : ""}${signOff ? " sign-off" : ""}`,
   );
 
-  if (last && (s.mode === "talking" || wake || signOff)) {
+  if (last && (s.mode === "talking" || cue !== null || signOff)) {
     try {
       const res = await maybeTalk(s, idx, last, t0);
       if (res) return res;
