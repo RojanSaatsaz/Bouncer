@@ -1,6 +1,7 @@
 // Users table helpers shared by every flow, plus "text this user" for alerts.
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { query, one } from "./db.js";
+import { config } from "./config.js";
 import { sendLines } from "./photon/client.js";
 
 export interface User {
@@ -14,6 +15,12 @@ export interface User {
   opted_in: boolean;
   listen_pending_at: Date | null;
   created_at: Date;
+}
+
+/** Bouncer's voice number for texts, e.g. "(617) 993-9248": iMessage turns it into a tap-to-call link. */
+export function voiceNumberForText(): string {
+  const p = parsePhoneNumberFromString(config.photon.voiceNumber, "US");
+  return p?.isValid() ? (p.countryCallingCode === "1" ? p.formatNational() : p.formatInternational()) : config.photon.voiceNumber;
 }
 
 /** E.164 for US-default numbers, or null if it isn't a phone number (e.g. an Apple ID email). */

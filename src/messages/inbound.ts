@@ -2,7 +2,7 @@
 // Order: YES/NO for a parked action → Flow 3 texts during an emergency → keywords → screenshot or text.
 // Message text and images live in memory only for this call (rule 1). Logs carry ids and labels, never content.
 import type { InboundMessage } from "../photon/socket.js";
-import { getOrCreateUser, saveConversation, setOptedIn, markListenPending, type User } from "../users.js";
+import { voiceNumberForText, getOrCreateUser, saveConversation, setOptedIn, markListenPending, type User } from "../users.js";
 import { sendLines, setTyping, downloadAttachment } from "../photon/client.js";
 import { parseYesNo, resolvePending } from "../pending.js";
 import { handleFamilyText, startFamilyEmergency } from "../family/index.js";
@@ -67,9 +67,11 @@ async function fetchImage(id: string, t0: number): Promise<{ data: Buffer; conte
 const looksLikeContent = (text: string) =>
   text.trim().length > 25 || /https?:\/\/|www\.|\b[a-z0-9-]+\.[a-z]{2,}\/?\b|\d{3,}/i.test(text);
 
+const CALL_NUMBER = voiceNumberForText();
 const WELCOME =
   "Hi, I'm Bouncer from T-Mobile. Send me any text, DM or screenshot you're unsure about and I'll check it. " +
-  "Reply YES to turn on call protection and alerts.";
+  `If a call ever feels off, call me at ${CALL_NUMBER} or merge me into the call and I'll listen quietly and text you warnings. ` +
+  `Save ${CALL_NUMBER} in your contacts as "Bouncer" so it's easy to find. Reply YES to turn on call protection and alerts.`;
 
 /** Flow 1 step 4. Asked in the same Jev request as the message questions (one round trip). */
 const INTENT: Record<string, JevQuestion> = {
@@ -110,15 +112,15 @@ const asksAboutMissing = (text: string) =>
 const isFollowup = (text: string) => text.length <= 80 && !/https?:|www\.|\d{4,}/i.test(text) && FOLLOWUP_RE.test(text);
 
 const OPT_IN = [
-  "You're all set. Text me anything suspicious, or call or merge me into a call that feels off and I'll text you warnings.",
-  "Done, call protection and alerts are on. If a call feels off, merge me in and I'll quietly listen and text you.",
-  "Great, you're protected. Send me anything sketchy, and merge me into any call that doesn't feel right.",
+  `You're all set. Text me anything suspicious, or call me at ${CALL_NUMBER} (or merge me into a call that feels off) and I'll text you warnings.`,
+  `Done, call protection and alerts are on. If a call feels off, add ${CALL_NUMBER} to it and merge, and I'll quietly listen and text you.`,
+  `Great, you're protected. Send me anything sketchy, and merge ${CALL_NUMBER} into any call that doesn't feel right.`,
 ];
 const ACK = ["👍", "Got it.", "Sounds good.", "Okay!"];
 const NO_REPLY = ["Okay, no problem.", "No worries. I'm here if you need me.", "Okay. Send me anything you'd like checked."];
 const LISTEN_REPLY = [
-  "Okay. Merge me into your call in the next 2 minutes and I'll listen quietly and text you warnings.",
-  "Ready. Tap Add Call, pick Bouncer, then Merge within 2 minutes. I'll stay quiet and text you if anything's off.",
+  `Okay. Add ${CALL_NUMBER} to your call and merge in the next 2 minutes, and I'll listen quietly and text you warnings.`,
+  `Ready. Tap Add Call, dial ${CALL_NUMBER}, then Merge within 2 minutes. I'll stay quiet and text you if anything's off.`,
 ];
 
 export async function handleInbound(msg: InboundMessage): Promise<void> {

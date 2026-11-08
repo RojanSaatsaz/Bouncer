@@ -7,6 +7,7 @@ import { generateJson, generate } from "./gemini.js";
 import { SCAM_TYPES } from "./questions.js";
 import { LEVEL_LABEL, type RiskLevel } from "./risk.js";
 import type { ScanResult } from "./scan.js";
+import { voiceNumberForText } from "../users.js";
 import type { Turn, VerdictMemo } from "../messages/history.js";
 
 const EMOJI: Record<RiskLevel, string> = { safe: "✅", unsure: "🤔", likely_scam: "⚠️", high_risk: "⚠️" };
@@ -216,7 +217,8 @@ export async function writeVerdictReply(
 /** What Bouncer really does. The chat model may only state these (no invented features). */
 const FACTS = [
   "Checking messages: the user pastes a text, email, DM or link, or sends a screenshot (up to 3 at once). Bouncer answers with a verdict (Looks safe, Not sure, Likely scam, High risk scam) and how confident it is, the red flags, and one safe next step. A scam-scoring model makes the verdict; it can be wrong, so it never says anything is 100% safe.",
-  "Calls: the user can call Bouncer's number (it's on the Bouncer contact card), or during a suspicious call tap Add Call, pick Bouncer, then Merge Calls. Bouncer stays silent, listens, and texts warnings here. Texting LISTEN first tells Bouncer to expect a merged call in the next 2 minutes. Saying \"Hey Bouncer\" on the call lets the user ask it something out loud; \"Thanks Bouncer\" makes it go quiet again. On a call it never says private info out loud, because a scammer may be listening; it texts it instead.",
+  `Bouncer's phone number is ${voiceNumberForText()}. Whenever calling or merging Bouncer comes up, write this number out so the user can tap it.`,
+  "Calls: the user can call Bouncer's number, or during a suspicious call tap Add Call, pick Bouncer, then Merge Calls. Bouncer stays silent, listens, and texts warnings here. Texting LISTEN first tells Bouncer to expect a merged call in the next 2 minutes. Saying \"Hey Bouncer\" on the call lets the user ask it something out loud; \"Thanks Bouncer\" makes it go quiet again. On a call it never says private info out loud, because a scammer may be listening; it texts it instead.",
   "Nothing happens from voice alone: calling a relative or alerting the family needs a YES by text, because a scammer on a merged call could say \"Hey Bouncer\" too.",
   "Replying YES turns on call protection and alerts.",
   "Family: text SET UP FAMILY to make a family circle with a secret family safe word; family members join by texting a JOIN code; CHANGE SAFE WORD picks a new one. If someone calls or texts saying a relative is in trouble and needs money, text Bouncer right away: it coaches the user to ask for the safe word, can call the relative's own number to check they're okay (after the user replies YES), and can alert the circle. Bouncer never says the safe word.",
@@ -316,7 +318,7 @@ const FAQ: Array<[RegExp, string[]]> = [
   [
     /\b(spoof|caller id|really (my|the|from)|(call|caller|calling).*\b(real|legit|actually|really)|verify (a |the )?(call|caller))/i,
     [
-      "Caller ID can be faked, so don't trust the number on screen. Hang up and call the number on the back of your card or in the official app. Real banks never ask you to read back a code or PIN. You can also merge me into a call that feels off and I'll text you warnings.",
+      `Caller ID can be faked, so don't trust the number on screen. Hang up and call the number on the back of your card or in the official app. Real banks never ask you to read back a code or PIN. You can also merge me (${voiceNumberForText()}) into a call that feels off and I'll text you warnings.`,
     ],
   ],
   [
@@ -344,7 +346,7 @@ const FAQ: Array<[RegExp, string[]]> = [
   [
     /\b(what (can|do) (you|u) do|how (does|do) (this|you|it) work|what are (you|u)|who are (you|u)|help)\b/i,
     [
-      "I check texts, emails, DMs and screenshots for scams: paste one here or send a picture and I'll tell you how risky it looks and why. On a call that feels off, merge me in and I'll quietly listen and text you warnings.",
+      `I check texts, emails, DMs and screenshots for scams: paste one here or send a picture and I'll tell you how risky it looks and why. On a call that feels off, call or merge in ${voiceNumberForText()} and I'll quietly listen and text you warnings.`,
     ],
   ],
 ];
