@@ -157,7 +157,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
 
   if (msg.attachmentIds.length) return handleScreenshot(user, msg, say, t0);
 
-  // 1. YES / NO for an action another flow parked (verify call, loss question, call feedback, …).
+  // 1. YES / NO for an action another flow parked (verify call, loss question, …).
   const yn = parseYesNo(text);
   if (yn && (await resolvePending(user.id, yn))) return;
 

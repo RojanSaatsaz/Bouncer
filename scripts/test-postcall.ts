@@ -28,7 +28,7 @@ const { resolvePending, peekPending, setPending } = await import("../src/pending
 const { handlePostCall, waitForPostCallWork } = await import("../src/voice/webhooks.js");
 const { dryRunOutbox } = await import("../src/photon/client.js");
 const { encryptWord } = await import("../src/family/crypto.js");
-const { contradiction, SUMMARY_MAX_CHARS, FEEDBACK_QUESTION, NO_SIGNS_TEXT } = await import("../src/voice/summary.js");
+const { contradiction, SUMMARY_MAX_CHARS, NO_SIGNS_TEXT } = await import("../src/voice/summary.js");
 const { scoreNow, alertsSettled, alertTexts } = await import("../src/voice/score.js");
 const { LEVEL_LABEL } = await import("../src/detection/risk.js");
 type Level = "safe" | "unsure" | "likely_scam" | "high_risk";
@@ -96,7 +96,7 @@ async function seedSafeWord() {
 async function endAndCheck(
   name: string,
   conv: string,
-  want: { level: Level; question: boolean; source?: "model" | "template"; warm?: boolean },
+  want: { level: Level; source?: "model" | "template"; warm?: boolean },
   secs = 180,
 ): Promise<string> {
   const from = dryRunOutbox.length;
@@ -120,13 +120,10 @@ async function endAndCheck(
   } else {
     const label = LEVEL_LABEL[want.level];
     check(`${name}: verdict line from Jev (${label})`, text.startsWith(`📞 Call summary: `) && text.split("\n")[0].includes(label), text.split("\n")[0]);
-    const body = text.split("\n").slice(1).join("\n").replace(FEEDBACK_QUESTION, "");
+    const body = text.split("\n").slice(1).join("\n");
     check(`${name}: body consistent with level ${want.level}`, contradiction(body, want.level) === null, contradiction(body, want.level) ?? "");
   }
-  check(
-    `${name}: feedback question ${want.question ? "asked" : "not asked"}`,
-    text.includes(FEEDBACK_QUESTION) === want.question && /Reply YES/.test(text) === want.question,
-  );
+  check(`${name}: no "was it a scam?" question`, !/was it a scam\?|reply yes or no|reply yes\b/i.test(text));
   return text;
 }
 
@@ -184,7 +181,7 @@ async function modelSections() {
     check("(e) alerts end with an action", alerts.every((a) => /hang up|don'?t|do not|never|call .*back|stop/i.test(a)));
     check("(e) alerts / transcript never logged", !serverLogs.some((l) => alerts.some((a) => l.includes(a.slice(15, 60))) || /Best Buy|Mark from/i.test(l)));
     const want = s.level as Level;
-    const text = await endAndCheck("(e) Chase summary", conv, { level: want, question: true, source: "model" });
+    const text = await endAndCheck("(e) Chase summary", conv, { level: want, source: "model" });
     check("(e) names Chase and the code / gift cards", /chase/i.test(text) && /code|gift card/i.test(text));
     check("(e) points to recovery", /already paid/i.test(text));
     setPending(uid, "noop", {}, -1);
@@ -206,7 +203,7 @@ async function modelSections() {
     s.probs = { family_danger: 0.95, money_or_code: 0.9, urgency_secrecy: 0.88, impersonation: 0.8, asks_code: 0.05, remote_access: 0.02, is_scam: 0.82 };
     for (const f of ["family_danger", "money_or_code", "urgency_secrecy", "impersonation"]) s.flags.add(f);
     for (const f of ["family_danger", "money_or_code", "urgency_secrecy"]) s.alerted.add(f);
-    const text = await endAndCheck("(f) family emergency summary", conv, { level: "likely_scam", question: true, source: "model" });
+    const text = await endAndCheck("(f) family emergency summary", conv, { level: "likely_scam", source: "model" });
     check("(f) specific: Jake / bail / jail", /jake|bail|jail/i.test(text));
     setPending(uid, "noop", {}, -1);
   }
@@ -227,7 +224,7 @@ async function modelSections() {
     s.replies.set(2, "That sounds like a common fake delivery text. Don't tap the link; check your orders in the Amazon app instead.");
     Object.assign(s, { level: "safe", p: 0.06 });
     s.probs = { impersonation: 0.3, money_or_code: 0.05, urgency_secrecy: 0.04, asks_code: 0.01, remote_access: 0.01, family_danger: 0.01, is_scam: 0.06 };
-    const text = await endAndCheck("(g) safe call + talk mode", conv, { level: "safe", question: false, source: "model", warm: true }, 95);
+    const text = await endAndCheck("(g) safe call + talk mode", conv, { level: "safe", source: "model", warm: true }, 95);
     check("(g) refers to the Amazon advice", /amazon|package|delivery/i.test(text));
     check("(g) no pending question", peekPending(uid) === null);
   }
@@ -249,7 +246,7 @@ async function modelSections() {
       for (const f of ["impersonation", "money_or_code", "urgency_secrecy"]) s.flags.add(f);
       s.alerted.add("money_or_code");
       s.alerted.add("urgency_secrecy");
-      const text = await endAndCheck("(h) model failure", conv, { level: "high_risk", question: true, source: "template" });
+      const text = await endAndCheck("(h) model failure", conv, { level: "high_risk", source: "template" });
       check("(h) template has reasons, a next step and recovery", /Real agencies send letters first/.test(text) && /What to do now/.test(text) && /already paid/.test(text));
       check("(h) template carries no call content", !/deputy|arrest/i.test(text));
     } finally {
@@ -272,7 +269,7 @@ async function modelSections() {
     Object.assign(s, { level: "unsure", p: 0.44, scamType: "other" });
     s.probs = { impersonation: 0.75, money_or_code: 0.2, urgency_secrecy: 0.3, asks_code: 0.2, is_scam: 0.44 };
     s.flags.add("impersonation");
-    const text = await endAndCheck("(i) unsure call", conv, { level: "unsure", question: false });
+    const text = await endAndCheck("(i) unsure call", conv, { level: "unsure" });
     check("(i) mentions Spectrum", /spectrum/i.test(text));
   }
 
@@ -284,7 +281,7 @@ try {
   uid = user.id;
   await saveConversation(uid, "tsp-space-0141", "tsp-agent");
 
-  section("(a) Listen call with red flags → event, summary, call_feedback, YES → feedback row");
+  section("(a) Listen call with red flags → event, summary, no yes/no question, nothing pending");
   {
     const conv = `conv_test_a_${tag}`;
     const s = getOrCreateSession(conv);
@@ -313,18 +310,12 @@ try {
     );
     const out = logs.slice(mark).join("\n");
     check(
-      "summary sent (no transcript → template): verdict line, reasons, question",
-      out.includes("📞 Call summary: ⚠️ High risk scam.") && out.includes("code, password or PIN") && out.includes(FEEDBACK_QUESTION),
+      "summary sent (no transcript → template): verdict line, reasons, no question",
+      out.includes("📞 Call summary: ⚠️ High risk scam.") && out.includes("code, password or PIN") && !/was it a scam\?|Reply YES/i.test(out),
     );
     check("template points to recovery (code was asked)", out.includes('"I already paid"'));
     check("transcript never logged", !out.includes("never be stored"));
-    const p = peekPending(uid);
-    check("call_feedback pending set", p?.kind === "call_feedback" && p.data.eventId === ev?.id);
-    const consumed = await resolvePending(uid, "yes");
-    check("YES consumed by call_feedback", consumed);
-    const fb = await one("SELECT * FROM feedback WHERE event_id = $1", [ev?.id]);
-    check("feedback row = yes", fb?.answer === "yes" && fb?.user_id === uid, JSON.stringify(fb));
-    check("thanks text sent", logs.slice(mark).some((l) => l.includes("Thanks for telling me")));
+    check("nothing pending, so a later YES isn't swallowed", peekPending(uid) === null);
   }
 
   section("(a2) Listen call, no flags → short summary, no question, no pending");

@@ -1,10 +1,8 @@
 // What happens when a call ends (SPEC Flow 2 step 10, Flow 3 step 8). Called by the post-call webhook
 // after the signature check. Never logs payload content: only type, agent and a conversation id prefix.
 import { config } from "../config.js";
-import { query } from "../db.js";
 import { endSession, peekSession } from "./session.js";
 import { onVerifyCallEnded } from "../family/index.js";
-import { setPending, registerPendingHandler } from "../pending.js";
 import { getUserById, textUser } from "../users.js";
 import { logEvent } from "../detection/scan.js";
 import { alertTexts } from "./score.js";
@@ -71,7 +69,7 @@ async function finishListenCall(
       ? Math.round(payloadSecs)
       : Math.round((Date.now() - s.startedAt) / 1000);
 
-  const eventId = await logEvent({
+  await logEvent({
     userId: s.userId,
     source: "call",
     level: s.level,
@@ -89,10 +87,6 @@ async function finishListenCall(
   }
 
   const keyPrefix = `bouncer:postcall:${conv}`;
-  // The question only when there were red flags and the slot is free: never overwrite a live action
-  // (e.g. "Reply YES and I'll call Jake"), or the user's YES would go to the other action.
-  const asked =
-    flags.length > 0 && eventId ? setPending(s.userId, "call_feedback", { eventId }, 5 * 60_000, { ifFree: true }) : false;
   const talkUsed = s.botTurns.size > 0 || replies.size > 0;
   const summary = await writeCallSummary(
     {
@@ -105,27 +99,13 @@ async function finishListenCall(
       alertsSent: alertTexts(s),
       durationS,
       talkUsed,
-      askFeedback: asked,
     },
     { turns: s.turns, botTurns: s.botTurns, replies },
     s.userId,
   );
   // Names and timings only, never the text (rule 1).
   console.log(
-    `[post-call] conv=${short(conv)} summary=${summary.source}${summary.reason ? ` (${summary.reason})` : ""} chars=${summary.text.length} ${summary.ms}ms asked=${asked}`,
+    `[post-call] conv=${short(conv)} summary=${summary.source}${summary.reason ? ` (${summary.reason})` : ""} chars=${summary.text.length} ${summary.ms}ms`,
   );
   await textUser(s.userId, [summary.text], keyPrefix);
 }
-
-// Always handled (returns true): the feedback row is stored and the user gets a thank-you text.
-// The window is short (5 min) so a later, unrelated YES / NO isn't taken as call feedback.
-registerPendingHandler("call_feedback", async (userId, data, answer) => {
-  const eventId = typeof data.eventId === "string" ? data.eventId : null;
-  await query("INSERT INTO feedback (user_id, event_id, answer) VALUES ($1, $2, $3)", [userId, eventId, answer]);
-  await textUser(
-    userId,
-    [answer === "yes" ? "Thanks for telling me. That helps me catch the next one." : "Thanks. Glad it was a real call."],
-    `bouncer:feedback:${eventId ?? Date.now()}`,
-  );
-  return true;
-});

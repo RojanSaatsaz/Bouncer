@@ -12,9 +12,8 @@ import { decryptWord } from "../family/crypto.js";
 import { redactSafeWord } from "./talk.js";
 import { scrubModelText } from "../photon/links.js";
 
-/** Total length cap for the post-call text (header + body + question). */
+/** Total length cap for the post-call text (header + body). */
 export const SUMMARY_MAX_CHARS = 900;
-export const FEEDBACK_QUESTION = "Was it a scam? Reply YES or NO.";
 export const NO_SIGNS_TEXT = "Call ended. I didn't hear any scam signs.";
 /** Wording only: reasoning on, since the call is over and nobody is waiting on the line. */
 const SUMMARY_TIMEOUT_MS = 20_000;
@@ -97,8 +96,6 @@ export interface SummaryFacts {
   durationS: number;
   /** The user talked with Bouncer ("Hey Bouncer") on this call. */
   talkUsed: boolean;
-  /** Ask the feedback question (only when the pending slot was free and there were red flags). */
-  askFeedback: boolean;
 }
 
 export interface CallDialogue {
@@ -159,7 +156,7 @@ const SUMMARY_SYSTEM = [
   "Style: sixth-grade words, short sentences, warm and calm, talk to the user as 'you'. Plain text only: no",
   "markdown, no headers or titles, no bold, no emoji. Separate paragraphs with one blank line.",
   "Do not write a greeting or sign-off, and do not repeat the verdict line (it is added above your text).",
-  "Do not ask whether it was a scam (that question is added separately).",
+  "Do not ask the user whether it was a scam, and don't end with a yes/no question.",
   "",
   "Privacy: never write the family safe word. In the transcript it appears as [family word]; if it matters,",
   "say 'your family word' and never guess it. Never write codes, passwords, account or card numbers,",
@@ -220,8 +217,8 @@ function factsBlock(f: SummaryFacts, flags: string[]): string {
 }
 
 /**
- * The whole post-call text: code-written verdict line, model-written explanation (or the template), and the
- * feedback question when asked. Never throws.
+ * The whole post-call text: code-written verdict line and model-written explanation (or the template).
+ * No "was it a scam?" question at the end (user decision, Nov 8). Never throws.
  */
 export async function writeCallSummary(f: SummaryFacts, d: CallDialogue, userId: string): Promise<SummaryResult> {
   const t0 = Date.now();
@@ -297,7 +294,6 @@ export async function writeCallSummary(f: SummaryFacts, d: CallDialogue, userId:
       timeoutMs: SUMMARY_TIMEOUT_MS,
     });
     const head = verdictLine(f);
-    const tail = f.askFeedback ? FEEDBACK_QUESTION : "";
     let body = scrubModelText(plain(raw))
       .split("\n")
       .filter((l) => !/was it a scam\?|reply yes or no/i.test(l) && !/^\W*call summary\b/i.test(l))
@@ -310,10 +306,10 @@ export async function writeCallSummary(f: SummaryFacts, d: CallDialogue, userId:
     // Recovery pointer is required when the caller asked for a code, money or access: add it if missing.
     if (flags.some((x) => CONCRETE_ASKS.includes(x)) && !/already paid/i.test(body)) body += `\n\n${RECOVERY_LINE}`;
 
-    const budget = SUMMARY_MAX_CHARS - head.length - (tail ? tail.length + 2 : 0) - 2;
+    const budget = SUMMARY_MAX_CHARS - head.length - 2;
     body = fitParagraphs(body, budget);
     if (!body) return template("too long");
-    return done([head, body, tail].filter(Boolean).join("\n\n"), "model");
+    return done(`${head}\n\n${body}`, "model");
   } catch (err: any) {
     // Error text never contains the transcript (openrouter.ts / gemini.ts log status codes only).
     return template(`model failed: ${String(err?.message ?? err).slice(0, 80)}`);
@@ -386,7 +382,6 @@ export function templateSummary(f: SummaryFacts): string {
   const step = atLeast(f.level, "likely_scam") ? NEXT_STEP[f.scamType ?? "other"] ?? NEXT_STEP.other : NEXT_STEP.other;
   parts.push(`What to do now: ${step}`);
   if (flags.some((x) => CONCRETE_ASKS.includes(x))) parts.push(RECOVERY_LINE);
-  if (f.askFeedback) parts.push(FEEDBACK_QUESTION);
   let text = parts.join("\n\n");
   // Stay under the cap: drop the third reason, then the second.
   while (text.length > SUMMARY_MAX_CHARS && why.length > 1) {
