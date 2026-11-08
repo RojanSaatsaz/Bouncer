@@ -104,6 +104,47 @@ The text numbers were measured before a later rule that cuts false alarms furthe
 - Family safe words are encrypted (AES-256-GCM) and never spoken.
 - The sign-up page never logs phone numbers or names.
 
+## What's next
+
+The prototype covers one person texting and calling Bouncer. Here's where we'd take it.
+
+### Scam Shield at the carrier level (concept mock-up)
+
+Today Bouncer only sees what someone sends it. With T-Mobile's network behind it, people wouldn't have to forward anything. A clickable mock-up of a carrier console is on the [`mockups` branch](https://github.com/RojanSaatsaz/HackUTD-26/tree/mockups/docs/mockups): [`carrier-dashboard.html`](https://github.com/RojanSaatsaz/HackUTD-26/blob/mockups/docs/mockups/carrier-dashboard.html). Every number in it is simulated; download the file and open it in a browser.
+
+- **Detect:** score incoming texts inside the network, throw the content away, and move high-risk fraud into a review queue.
+- **Learn:** group scams into anonymous templates (what REPORT already does) and flag a template that is spreading fast across ZIP codes.
+- **Warn ahead:** when a scam spikes, send people in that area one short heads-up before it reaches them (at most one a day), and check whether warned people tap fewer scam links.
+- **Protect:** text the customer within about a second and a half of a scam text arriving, with no screenshot or forwarding.
+
+The pieces already exist in this repo: `src/carrier` replays simulated carrier events, `src/patterns` finds spikes, and `src/dashboard` is a password-protected dashboard. Real network access is the missing part.
+
+### More places people get scammed
+
+Scams don't stay in one app. Bouncer's checks take plain text or a picture and return a verdict; only the messaging layer (`src/photon`) is tied to iMessage. Next channels:
+
+- **SMS and RCS**, for Android phones and anyone not on iMessage.
+- **WhatsApp, Telegram and Facebook Messenger**, where job, crypto and "wrong number" scams often start.
+- **Email:** forward a suspicious email to a Bouncer address and get the same verdict, red flags and real contact info.
+
+Screenshots from any of these apps already work today; a direct channel removes that step. Every new channel keeps the same rules: Jev decides, no content is stored, and every action needs a YES in the person's own thread.
+
+### Privacy, consent and security before a real launch
+
+A planning page on the same branch, [`consent-and-security.html`](https://github.com/RojanSaatsaz/HackUTD-26/blob/mockups/docs/mockups/consent-and-security.html), covers the legal work and an interactive consent checker. It isn't legal advice; a lawyer would review every point before Bouncer listens to real customers' calls.
+
+- **Call consent by state.** Bouncer doesn't record calls, but it listens and transcribes them live, and some wiretap laws ([California Penal Code § 632](https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=PEN&sectionNum=632)) cover listening, not just recording. 11 states require everyone on a call to agree, and we'd treat 2 unclear states (Connecticut, Michigan) the same way. Plan: a consent checker decides at the start of each call whether Bouncer's first words are a one-line notice ("This call is being screened for scams by T-Mobile"). It gives the notice whenever anything is unknown, which today includes every merged call. If a scammer hangs up on hearing it, that's a win too.
+- **Vendors.** Contracts with ElevenLabs and the language-model providers that forbid training on or reusing call data, and zero-retention modes where they exist.
+- **AI voice calls.** The FCC treats AI voices as "artificial" voices under the TCPA, so verification calls need prior consent. Bouncer already calls only relatives who joined the family circle, and only after a YES by text; next is keeping a timestamped record of that consent, with no content.
+- **Carrier data.** Screening messages at the network level touches customer network data (CPNI) under FCC rules. It needs T-Mobile legal and privacy review and a clear customer opt-in first.
+- **Privacy rights.** A privacy notice and STOP, HELP and DELETE MY DATA text commands (California's CCPA/CPRA and similar laws).
+- **No voiceprints.** Speech-to-text only, no identifying people by their voice (Illinois' BIPA), unless someone gives written consent.
+- **One spoofing gap to close.** The verification call asks the relative to say the safe word, so a scammer who fakes Bouncer's call number could ask for it too. Fix: text the relative from the text line first ("Bouncer is calling you now"), or have them send the word by text in their own thread.
+
+### Signing people up at scale
+
+The `/join` link works for an event. For real customers: turn Bouncer on from the T-Mobile account (T-Life app or in a store), confirm the phone number with a code first, and move from Photon's shared iMessage line, which has a per-project cap, to a dedicated line anyone can text directly.
+
 ## Tech stack
 
 Node 22 + TypeScript (run with `tsx`) · Hono · PostgreSQL · Railway (Docker) · [Photon 2.0](https://photon.codes) (iMessage + voice over SIP) · [ElevenLabs Agents](https://elevenlabs.io) (our server is the custom LLM) · [TypeSafe Jev](https://docs.typesafe.ai) `jev-1.14.0` · DeepSeek V4.1 Flash via [OpenRouter](https://openrouter.ai) (Gemini as fallback)
