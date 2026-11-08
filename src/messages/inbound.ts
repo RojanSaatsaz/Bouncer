@@ -20,9 +20,10 @@ import {
 import { extractScreenshot, type Extracted } from "../detection/extract.js";
 import { isKnownContact, scoreAnswers, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
 import { MESSAGE_QUESTIONS } from "../detection/questions.js";
-import { atLeast, LEVEL_LABEL } from "../detection/risk.js";
+import { atLeast, LEVEL_LABEL, type RiskLevel } from "../detection/risk.js";
 import { writeVerdictReply, answerChat, pickFresh, topFlags, type ChatKind } from "../detection/reply.js";
-import { addUserTurn, addBouncerTurn, getHistory, setVerdict } from "./history.js";
+import { addUserTurn, addBouncerTurn, getHistory, setVerdict, markScreenshot } from "./history.js";
+import { hasLink } from "../photon/links.js";
 
 const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
 
@@ -105,6 +106,15 @@ const FOLLOWUP_RE =
  * "Is this text from my bank a scam?" with nothing pasted: a question ABOUT a message, not the message.
  * Short, phrased as a question, no link, number or quote. Only used when Jev scores it below Likely.
  */
+/**
+ * iOS sends a screenshot and the words typed with it as two separate messages, picture first. A text that
+ * comes within a minute of a screenshot, with no link or long number of its own, is the user talking about
+ * that screenshot ("what is this link? is this a scam?"), not a new message to judge on its own.
+ */
+const CAPTION_WINDOW_MS = 60_000;
+const isCaption = (text: string, screenshotAt: number | null) =>
+  !!screenshotAt && Date.now() - screenshotAt < CAPTION_WINDOW_MS && text.length <= 500 && !hasLink(text) && !/\d{4,}/.test(text);
+
 const ASKS_ABOUT_MISSING_RE =
   /^\s*(is|are|was|could|can (you|u) (tell|check)|does|do (you|u) think)\b.{0,60}\b(scam|scams|legit|real|safe|fake|spam|phishing)\b[^"“]*\?*\s*$/i;
 const asksAboutMissing = (text: string) =>
@@ -229,6 +239,22 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
     const intent = choice(scan.jev, "intent");
     console.log(`[inbound] user ${uid} text intent=${intent.label} (${intent.confidence.toFixed(2)}) level=${scan.risk.level}`);
 
+    // The words sent along with a screenshot: answered as chat about that screenshot's verdict, so the user
+    // never gets a second, contradictory verdict for their own caption. Emergencies, "I already paid",
+    // REPORT and setup still route normally. A caption that Jev finds riskier than the screenshot itself
+    // still gets its own verdict (rule 3).
+    const screenshotLevel = (history.verdict?.source === "screenshot" ? history.verdict.level : "safe") as RiskLevel;
+    if (
+      (intent.label === "check_message" || intent.label === "question") &&
+      isCaption(text, history.screenshotAt) &&
+      !(atLeast(scan.risk.level, "likely_scam") && !atLeast(screenshotLevel, scan.risk.level))
+    ) {
+      const kind: ChatKind = history.verdict ? "followup" : "question";
+      await chat(user, text, kind, say, Date.now() + 3_000, history);
+      console.log(`[inbound] user ${uid} caption chat kind=${kind} level=${scan.risk.level} in ${Date.now() - t0} ms`);
+      return;
+    }
+
     switch (intent.label) {
       case "family_emergency":
         // Flow 3 sends the coach text itself; no reply from here. Chat memory gets a note, not the texts.
@@ -283,6 +309,7 @@ async function chat(user: User, text: string, kind: ChatKind, say: Say, deadline
 
 async function handleScreenshot(user: User, msg: InboundMessage, say: Say, t0: number) {
   // Start downloading while "Looking at it now..." is sent (the download is 1–3.5 s of the 6 s budget).
+  markScreenshot(user.id); // so the caption iOS sends right after is read as about this picture
   const downloads = msg.attachmentIds.slice(0, 3).map((id) => fetchImage(id, t0));
   downloads.forEach((p) => p.catch(() => {})); // handled below; avoids an unhandled rejection meanwhile
   await say(["Looking at it now..."], "look");

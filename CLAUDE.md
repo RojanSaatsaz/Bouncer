@@ -91,7 +91,7 @@ Read them in one place (`src/config.ts`) and fail fast with a clear message if a
 - **Jev:** send all questions in ONE request (`POST https://api.typesafe.ai/v1/systemone`). Question types: `noul` (yes/no), `choice`, `score`. Pin `JEV_MODEL` after tuning.
 - **Message questions:** impersonation, money_or_code, urgency_secrecy, link_mismatch, asks_code, is_scam, scam_type (choice), plus our addition **callback**: "The message tells the reader to contact a phone number or link given in the message, instead of the company's official app, website or the number on their card." Treat callback >= 0.7 like link_mismatch.
 - **Risk levels:** safe, unsure, likely_scam, high_risk. Logic in SPEC Flow 1 step 8; thresholds in `config/thresholds.json` after tuning.
-- **Replies:** plain words, sixth-grade reading level. Line 1 verdict + confidence, line 2 up to three red flags, line 3 one safe next step. Never say "100% safe."
+- **Replies:** plain words, sixth-grade reading level. Line 1 verdict (never a confidence % or score in anything the user sees: iMessage, chat, call summaries, carrier alerts; user decision Nov 8), line 2 up to three red flags, line 3 one safe next step. Never say "100% safe."
 
 ## Test data
 

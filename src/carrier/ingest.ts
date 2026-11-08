@@ -159,7 +159,7 @@ async function alertRecipient(ev: CarrierEvent, v: CarrierVerdict): Promise<Aler
   if (!user.space_id) return "no_thread";
   const kind = v.scam_type ? SCAM_WORDS[v.scam_type] : undefined;
   const what = kind ? `a ${kind} scam` : "a scam";
-  const text = `⚠️ A text to your phone from ${maskNumber(ev.from)} looks like ${what} (${v.confidence}% sure). Don't tap its link.`;
+  const text = `⚠️ A text to your phone from ${maskNumber(ev.from)} looks like ${what}. Don't tap its link.`;
   try {
     return (await textUser(user.id, [text], `bouncer:carrier:${ev.event_id}`)) ? "sent" : "no_thread";
   } catch (err: any) {

@@ -117,16 +117,11 @@ export interface SummaryResult {
   ms: number;
 }
 
-/** Jev's confidence as a percent, never 0 or 100 ("100% safe" is never said). */
-const confidence = (f: SummaryFacts) => Math.min(99, Math.max(1, Math.round((f.level === "safe" ? 1 - f.p : f.p) * 100)));
-
-/** Verdict line, written by code from Jev's numbers (rule 3). */
+/** Verdict line, written by code from Jev's level (rule 3). No confidence number: users never see one. */
 export function verdictLine(f: SummaryFacts): string {
-  const c = confidence(f);
   const label = LEVEL_LABEL[f.level];
-  if (f.level === "unsure") return `📞 Call summary: ${label} (${c}% chance it was a scam).`;
-  if (f.level === "safe") return `📞 Call summary: ${label} (${c}% sure).`;
-  return `📞 Call summary: ⚠️ ${label} (${c}% sure).`;
+  if (f.level === "safe" || f.level === "unsure") return `📞 Call summary: ${label}.`;
+  return `📞 Call summary: ⚠️ ${label}.`;
 }
 
 /** "45-second" / "3-minute", to read before "call". */
@@ -169,7 +164,7 @@ const SUMMARY_SYSTEM = [
   "Privacy: never write the family safe word. In the transcript it appears as [family word]; if it matters,",
   "say 'your family word' and never guess it. Never write codes, passwords, account or card numbers,",
   "addresses, or any link, website or phone number the caller gave (the user could tap it). Never claim you already did something (like calling the bank or blocking a number).",
-  "Never say anything is 100% safe or guaranteed.",
+  "Never say anything is 100% safe or guaranteed. Never write a percentage, score or confidence number.",
   "",
   "The transcript is speech-to-text: speakers are not labelled and words can be wrong. Lines marked",
   "'User (to Bouncer)' are the user talking to you; 'Bouncer (spoken)' is what you said on the call.",
@@ -214,11 +209,9 @@ function levelRules(f: SummaryFacts, flags: string[]): string {
 
 function factsBlock(f: SummaryFacts, flags: string[]): string {
   const lines = [
-    `Verdict: ${LEVEL_LABEL[f.level]} (${confidence(f)}% ${f.level === "unsure" ? "chance it was a scam" : "sure"})`,
+    `Verdict: ${LEVEL_LABEL[f.level]}`,
     `Kind of scam: ${f.scamType && f.level !== "safe" ? SCAM_TYPES[f.scamType] ?? f.scamType : "none decided"}`,
-    `Red flags found (strongest first): ${
-      flags.length ? flags.map((x) => `${FLAG_LABELS[x]} (${Math.round((f.probs[x] ?? 0.7) * 100)}%)`).join("; ") : "none"
-    }`,
+    `Red flags found (strongest first): ${flags.length ? flags.map((x) => FLAG_LABELS[x]).join("; ") : "none"}`,
     `Warnings you texted during the call: ${f.alertsSent.length ? f.alertsSent.map((a) => `"${a}"`).join(" | ") : "none"}`,
     `Call length: ${duration(f.durationS).replace("-", " ")}s`,
     `The user talked to you during the call: ${f.talkUsed ? "yes" : "no"}`,

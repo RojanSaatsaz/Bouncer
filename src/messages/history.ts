@@ -31,6 +31,8 @@ export interface VerdictMemo {
 interface Convo {
   turns: Turn[];
   verdict: VerdictMemo | null;
+  /** When the user last sent a screenshot (epoch ms). Its caption arrives as a separate text right after. */
+  screenshotAt: number | null;
   timer: NodeJS.Timeout;
 }
 
@@ -39,7 +41,7 @@ const convos = new Map<string, Convo>();
 function touch(userId: string): Convo {
   let c = convos.get(userId);
   if (c) clearTimeout(c.timer);
-  else c = { turns: [], verdict: null, timer: undefined as unknown as NodeJS.Timeout };
+  else c = { turns: [], verdict: null, screenshotAt: null, timer: undefined as unknown as NodeJS.Timeout };
   c.timer = setTimeout(() => convos.delete(userId), TTL_MS);
   c.timer.unref(); // don't keep the process (or a test script) alive just for this
   convos.set(userId, c);
@@ -61,10 +63,14 @@ export function setVerdict(userId: string, v: Omit<VerdictMemo, "at">) {
   touch(userId).verdict = { ...v, at: Date.now() };
 }
 
+export function markScreenshot(userId: string) {
+  touch(userId).screenshotAt = Date.now();
+}
+
 /** A copy of the live conversation (empty when none, or expired). */
-export function getHistory(userId: string): { turns: Turn[]; verdict: VerdictMemo | null } {
+export function getHistory(userId: string): { turns: Turn[]; verdict: VerdictMemo | null; screenshotAt: number | null } {
   const c = convos.get(userId);
-  return c ? { turns: [...c.turns], verdict: c.verdict } : { turns: [], verdict: null };
+  return c ? { turns: [...c.turns], verdict: c.verdict, screenshotAt: c.screenshotAt } : { turns: [], verdict: null, screenshotAt: null };
 }
 
 export function clearHistory(userId: string) {

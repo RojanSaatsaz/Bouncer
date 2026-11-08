@@ -113,6 +113,7 @@ async function endAndCheck(
   check(`${name}: no safe word`, !leaks(text));
   check(`${name}: safe word / transcript never logged`, !logs.slice(mark).some((l) => leaks(l) && !l.includes("dry-run")));
   check(`${name}: never 100% / guaranteed`, !/100\s?%|guarantee/i.test(text));
+  check(`${name}: no confidence percentage`, !/\d\s?%\s*(sure|chance)/i.test(text));
   if (want.source) check(`${name}: written by ${want.source}`, meta.includes(`summary=${want.source}`), meta);
   if (want.warm) {
     check(`${name}: warm note, no verdict line`, !text.startsWith("📞") && text.length < 320, text.slice(0, 40));
@@ -313,7 +314,7 @@ try {
     const out = logs.slice(mark).join("\n");
     check(
       "summary sent (no transcript → template): verdict line, reasons, question",
-      out.includes("📞 Call summary: ⚠️ High risk scam (93% sure).") && out.includes("code, password or PIN") && out.includes(FEEDBACK_QUESTION),
+      out.includes("📞 Call summary: ⚠️ High risk scam.") && out.includes("code, password or PIN") && out.includes(FEEDBACK_QUESTION),
     );
     check("template points to recovery (code was asked)", out.includes('"I already paid"'));
     check("transcript never logged", !out.includes("never be stored"));
