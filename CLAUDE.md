@@ -8,8 +8,7 @@ Users text Bouncer on iMessage (chat + screenshots) and call it, or merge it int
 
 ## Scope (tonight)
 
-- **In:** Flow 1 (screenshot scanner), Flow 2 (live listen + "Hey Bouncer"), Flow 3 trimmed (safe-word coaching, verification call, circle alert; circle and safe word are seeded by script, no JOIN-code flow), Flow 6 trimmed (holdout accuracy numbers).
-- **Out:** Flow 4 recovery (one checklist text at most), Flow 5 pattern recognition, Flow 7 carrier feed and dashboard. Don't build these unless asked.
+- **Built:** Flow 1 (screenshot scanner), Flow 2 (live listen + "Hey Bouncer"), Flow 3 (coaching, verification call, circle alert, and setup by text with JOIN codes), Flow 4 recovery checklist (`src/recovery`), Flow 5 REPORT/templates/spikes (`src/patterns`), Flow 6 evals (Mendeley, archive, calls), Flow 7 dashboard + carrier feed (`src/dashboard`, `src/carrier`). The user asked for Flows 4, 5 and 7 on Nov 8.
 
 ## Stack
 
@@ -33,6 +32,10 @@ npm run test:message   # Flow 1 runner (fake envelopes, DRY_RUN)
 npm run test:call      # Flow 2 runner (simulated call turns)
 npm run seed:family    # Flow 3 demo circle + safe word
 npm run eval           # Flow 6 tuning / holdout scoring
+npm run eval:archive   # message eval on data/scams_archive_en.csv
+npm run eval:calls     # call eval (archive call scripts + BETTER30)
+npm run test:postcall | test:recovery | test:setup | test:patterns
+npm run replay -- --one toll --to +1...   # Flow 7 simulated carrier event
 ```
 
 Local DB access without a public URL: `railway connect Postgres --tunnel-only --port 54329` (local `.env` already points at `127.0.0.1:54329`). The tunnel runs through the app container, so **reopen it after every Railway redeploy**.
@@ -57,7 +60,7 @@ Create folders as needed; keep this shape.
 
 ## Database
 
-Tables already exist on Railway: `users, circles, circle_members, safe_words, contact_memory, events, feedback, verifications, processed_messages, photon_cursor, eval_results`. Definitions are in `scripts/migrate.ts`. Change the schema only by editing that file with `IF NOT EXISTS` / `ALTER ... IF NOT EXISTS`, never by hand.
+Definitions are in `src/schema.ts` (Flow 1–3 tables, plus Flow 5 `report_templates, report_counts, pattern_spikes` and Flow 7 `carrier_events, dashboard_state`). The server runs it on every startup, and `npm run migrate` runs it by hand. Change the schema only by editing that file with `IF NOT EXISTS` / `ALTER ... IF NOT EXISTS`, never by hand.
 
 ## Environment variables
 
@@ -65,7 +68,7 @@ All in `.env` locally and Railway Variables in production. Never commit `.env`.
 
 `PHOTON_PROJECT_API_KEY, PHOTON_PROJECT_ID, PHOTON_IMESSAGE_HANDLE, PHOTON_VOICE_NUMBER, TYPESAFE_API_KEY, JEV_MODEL, GEMINI_API_KEY, GEMINI_MODEL, ELEVENLABS_API_KEY, ELEVENLABS_LISTEN_AGENT_ID, ELEVENLABS_VERIFY_AGENT_ID, ELEVENLABS_PHONE_NUMBER_ID, ELEVENLABS_WEBHOOK_SECRET, BOUNCER_LLM_SECRET, BOUNCER_INIT_TOKEN, SAFE_WORD_KEY, DATABASE_URL, PUBLIC_BASE_URL`
 
-Optional: `GEMINI_FAST_MODEL` (default `gemini-3.5-flash-lite`, for replies and voice), `PHOTON_SOCKET` (`on` on Railway, `off` in local `.env`, see rule 5), `DRY_RUN=1` (print iMessages instead of sending), `PORT` (pinned to 3000 on Railway to match the domain).
+Optional: `DASHBOARD_PASSWORD` (Flow 7 routes return 503 without it), `DEMO_VICTIM_PHONE`, `GEMINI_EMBED_MODEL`, `PATTERN_SPIKE_THRESHOLD` (default 3), `GEMINI_FAST_MODEL` (default `gemini-3.5-flash-lite`, for replies and voice), `PHOTON_SOCKET` (`on` on Railway, `off` in local `.env`, see rule 5), `DRY_RUN=1` (print iMessages instead of sending), `PORT` (pinned to 3000 on Railway to match the domain).
 
 Read them in one place (`src/config.ts`) and fail fast with a clear message if a required one is missing.
 
