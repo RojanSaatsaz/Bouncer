@@ -238,7 +238,7 @@ try {
     check("Grandma told someone couldn't give the word", textsTo(SPACE.gma, t).some((x) => x.startsWith("Someone answered Jake's number but couldn't give the family word.")));
     const ty = mark();
     await resolvePending(ids.gma, "yes");
-    check("YES → one checklist text", textsTo(SPACE.gma, ty).some((x) => x.startsWith("I'm sorry. Do these now:")));
+    check("YES → recovery menu (Flow 4)", textsTo(SPACE.gma, ty).some((x) => x.startsWith("I'm sorry that happened")));
     const alert = textsTo(SPACE.mom, ty);
     check("alert without 'No money was sent.'", alert.length === 1 && alert[0].includes("couldn't confirm Jake is safe") && !alert[0].includes("No money"), alert.join(" | "));
     await family.onVerifyCallEnded(v.conv, { failed: false });

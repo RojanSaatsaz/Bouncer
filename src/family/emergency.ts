@@ -7,6 +7,7 @@ import { clearPending, registerPendingHandler, setPending } from "../pending.js"
 import { sendText } from "../photon/client.js";
 import type { InboundMessage } from "../photon/socket.js";
 import { textUser, type User } from "../users.js";
+import { startRecovery } from "../recovery/index.js";
 import {
   cap,
   getCircleForProtected,
@@ -264,17 +265,13 @@ export async function onVerificationResult(r: {
   em.alertTimer.unref?.();
 }
 
-const LOSS_CHECKLIST =
-  "I'm sorry. Do these now: 1) Call your bank or card company using the number on your card and say it was a scam. " +
-  "2) If you shared a code, change that account's password. 3) Gift cards: call the number on the back of the card. " +
-  "4) Report it at reportfraud.ftc.gov.";
-
 registerPendingHandler("loss_question", async (userId, data, answer) => {
   const em = activeEmergency(userId);
   if (!em || em.id !== data.emergencyId) return false; // stale: router replies
   em.loss = answer;
   if (answer === "yes") {
-    await textProtected(em, "loss-yes", [LOSS_CHECKLIST]);
+    // Flow 4: asks what happened (numbered menu), then texts the checklist one step at a time.
+    await startRecovery({ userId: em.userId, source: "family" });
   } else {
     await textProtected(em, "loss-no", ["Good. Never send money or codes to someone who calls in a hurry."]);
   }

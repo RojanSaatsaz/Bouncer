@@ -6,6 +6,7 @@ import { getOrCreateUser, saveConversation, setOptedIn, markListenPending, type 
 import { sendLines, setTyping, downloadAttachment } from "../photon/client.js";
 import { parseYesNo, resolvePending } from "../pending.js";
 import { handleFamilyText, startFamilyEmergency } from "../family/index.js";
+import { startRecovery, handleRecoveryText } from "../recovery/index.js";
 import { askJev, choice, type JevQuestion } from "../detection/jev.js";
 import { extractScreenshot, type Extracted } from "../detection/extract.js";
 import { isKnownContact, scoreAnswers, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
@@ -72,12 +73,6 @@ const INTENT: Record<string, JevQuestion> = {
   },
 };
 
-const RECOVERY =
-  "Act fast: 1) Card or bank payment: call the number on the back of your card now and ask to stop or dispute it. " +
-  "2) Gift card: call the gift card company with the card number and receipt. " +
-  "3) Shared a code or password: change that password now, plus anywhere you reused it. " +
-  "4) Gave your SSN: freeze your credit and go to IdentityTheft.gov.";
-
 const LISTEN_RE = /^\s*(listen|listen in|start listening)\s*[.!]?\s*$/i;
 
 export async function handleInbound(msg: InboundMessage): Promise<void> {
@@ -102,6 +97,9 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
   // 1. YES / NO for an action another flow parked (verify call, loss question, call feedback, …).
   const yn = parseYesNo(text);
   if (yn && (await resolvePending(user.id, yn))) return;
+
+  // 1b. Flow 4: menu number / DONE / NEXT / STOP while a recovery checklist is open.
+  if (await handleRecoveryText(user, msg)) return;
 
   // 2. Flow 3 texts during an active emergency ("what's the word?", "he said the word").
   if (await handleFamilyText(user, msg)) return;
@@ -143,8 +141,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
         await startFamilyEmergency({ userId: user.id, content: text, source: "text" });
         return;
       case "already_paid":
-        await say([RECOVERY, "If you lost money, also report it at reportfraud.ftc.gov."]);
-        await logEvent({ userId: user.id, source: "imessage", outcome: "recovery_checklist", latencyMs: Date.now() - t0 });
+        await startRecovery({ userId: user.id, text, source: "text" });
         return;
       case "report":
         await say(["Thanks for telling me. Forward the scam text to 7726 (SPAM) so T-Mobile can block it, then delete it."]);

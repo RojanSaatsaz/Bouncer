@@ -6,6 +6,7 @@ import { generateStream } from "../detection/gemini.js";
 import { LEVEL_LABEL } from "../detection/risk.js";
 import { FLAG_LABELS } from "../detection/questions.js";
 import { startFamilyEmergency } from "../family/index.js";
+import { saysAlreadyPaid, startRecovery } from "../recovery/index.js";
 import { getCircleForProtected, getSafeWordRow } from "../family/circle.js";
 import { decryptWord, editDistance, normalizeWord, type EncryptedWord } from "../family/crypto.js";
 import { ADDRESSED_QUESTION, ACTION_QUESTION } from "./questions.js";
@@ -53,7 +54,7 @@ export async function maybeTalk(s: CallSession, idx: number, text: string): Prom
     if (gen === null) return skipTurnResponse();
     console.log(`[listen] conv=${short(s.conv)} turn=${idx} wake phrase → talking`);
     void checkAction(s, idx);
-    return speak(s, idx, gen, reply(s, idx));
+    return (await recoveryReply(s, idx, gen, text)) ?? speak(s, idx, gen, reply(s, idx));
   }
 
   // Talk mode, a newer turn than the one we answered: is it still for Bouncer? (step 8)
@@ -76,9 +77,28 @@ export async function maybeTalk(s: CallSession, idx: number, text: string): Prom
     if (gen === null) return skipTurnResponse();
     console.log(`[listen] conv=${short(s.conv)} turn=${idx} follow-up for Bouncer → answering`);
     void checkAction(s, idx);
-    return speak(s, idx, gen, reply(s, idx));
+    return (await recoveryReply(s, idx, gen, text)) ?? speak(s, idx, gen, reply(s, idx));
   }
   return null;
+}
+
+/** Calls where Flow 4 was already started (one checklist per call). */
+const recoveryStarted = new WeakSet<CallSession>();
+
+/**
+ * Flow 4 trigger by voice ("Hey Bouncer, I already paid"): the steps go out by text only, never spoken.
+ * Texting the user's own thread is not an action on their behalf, so no YES is needed (rule 4).
+ */
+async function recoveryReply(s: CallSession, idx: number, gen: number, text: string): Promise<Response | null> {
+  if (!saysAlreadyPaid(text)) return null;
+  await s.identifying;
+  if (!s.userId || s.userId === "unknown") return speak(s, idx, gen, "Text me what happened and I'll send you the steps.");
+  if (!recoveryStarted.has(s)) {
+    recoveryStarted.add(s);
+    console.log(`[listen] conv=${short(s.conv)} turn=${idx} says already paid → Flow 4 by text`);
+    void startRecovery({ userId: s.userId, text, source: "call" });
+  }
+  return speak(s, idx, gen, "I've sent the steps to your phone.");
 }
 
 /**
