@@ -117,9 +117,71 @@ CREATE TABLE IF NOT EXISTS eval_results (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS photon_sender_id text;
 
 -- ===== Flow 5 (reports / patterns) tables go here =====
+-- Anonymised scam templates ({NAME}, {PHONE}, {AMOUNT}, {DATE}, {LINK}, {CODE}). No user id, no raw text.
+-- embedding: Gemini embedding of the template as real[] (no pgvector); NULL when embedding failed.
+CREATE TABLE IF NOT EXISTS report_templates (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  template           text NOT NULL,
+  brand              text,
+  scam_type          text NOT NULL,
+  link_domain        text,                   -- registered domain, e.g. ezpass-pay.top
+  embedding          real[],
+  status             text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'spiking')),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  last_seen          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS report_templates_type_seen ON report_templates (scam_type, last_seen);
+
+-- Report counter by ZIP3 and day ('unk' when the reporter has no ZIP). Counts only, never who.
+CREATE TABLE IF NOT EXISTS report_counts (
+  template_id        uuid NOT NULL REFERENCES report_templates(id) ON DELETE CASCADE,
+  zip3               text NOT NULL,
+  day                date NOT NULL DEFAULT current_date,
+  count              integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (template_id, zip3, day)
+);
+
+-- One row per template per ZIP3 that spiked: makes the local alert go out once (re-armed after 7 days).
+CREATE TABLE IF NOT EXISTS pattern_spikes (
+  template_id        uuid NOT NULL REFERENCES report_templates(id) ON DELETE CASCADE,
+  zip3               text NOT NULL,
+  spiked_at          timestamptz NOT NULL DEFAULT now(),
+  alerts_sent        integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (template_id, zip3)
+);
+
+-- At most one local alert per user per day (Flow 5 step 7). Says nothing about what the user reported.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_local_alert_at timestamptz;
 -- ===== end Flow 5 =====
 
 -- ===== Flow 7 (carrier feed / dashboard) tables go here =====
+-- Simulated carrier traffic only (replay script + demo button). body is public dataset text, never a
+-- real user's message. Phone numbers are stored masked (last 4 digits only).
+CREATE TABLE IF NOT EXISTS carrier_events (
+  id                 bigserial PRIMARY KEY,
+  event_id           text NOT NULL UNIQUE,
+  to_number          text,                   -- masked, e.g. "…0147"
+  from_masked        text,                   -- masked, e.g. "…8812"
+  zip                text,
+  level              text,                   -- safe | unsure | likely_scam | high_risk
+  p_scam             real,
+  scam_type          text,
+  flags              text[],
+  body               text,                   -- dataset text only
+  true_label         text,                   -- scam | legit | spam (scoring only, never sent to Jev)
+  latency_ms         integer,
+  alerted            boolean NOT NULL DEFAULT false,
+  bulk               boolean NOT NULL DEFAULT false,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS carrier_events_created_at_idx ON carrier_events (created_at);
+
+-- Small key/value store for the dashboard (e.g. reset_at: the feed hides events older than the last "Reset demo").
+CREATE TABLE IF NOT EXISTS dashboard_state (
+  key                text PRIMARY KEY,
+  value              text,
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
 -- ===== end Flow 7 =====
 `;
 

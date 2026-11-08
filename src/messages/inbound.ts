@@ -8,7 +8,15 @@ import { parseYesNo, resolvePending } from "../pending.js";
 import { handleFamilyText, startFamilyEmergency } from "../family/index.js";
 import { startRecovery, handleRecoveryText } from "../recovery/index.js";
 import { handleSetupText, startSetup, isSetupCommand } from "../family/setup.js";
-import { askJev, choice, type JevQuestion } from "../detection/jev.js";
+import { askJev, choice, noul, type JevQuestion } from "../detection/jev.js";
+import {
+  handleReport,
+  rememberBody,
+  setZipFromText,
+  activePatternsFor,
+  MATCHES_PATTERN_QUESTION,
+  applyPatternFloorToRisk,
+} from "../patterns/index.js";
 import { extractScreenshot, type Extracted } from "../detection/extract.js";
 import { isKnownContact, scoreAnswers, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
 import { MESSAGE_QUESTIONS } from "../detection/questions.js";
@@ -21,9 +29,13 @@ const SORRY = "Sorry, I couldn't check that right now. Try again in a minute.";
  * Same as scan.ts scanMessage, but with a tight Jev budget for a live user (the defaults of 20 s × 3
  * retries suit the eval, not a chat): one retry, 4 s per try, so a failure surfaces in ~8 s at worst.
  */
-async function scanLive(state: MessageState, extra: Record<string, JevQuestion> = {}): Promise<ScanResult> {
-  const r = await askJev(state, { ...MESSAGE_QUESTIONS, ...extra }, { retries: 1, timeoutMs: 4_000 });
-  return scoreAnswers(r, !!state.known_contact);
+async function scanLive(state: MessageState, extra: Record<string, JevQuestion> = {}, patterns: string[] = []): Promise<ScanResult> {
+  // Flow 5 step 8: scam templates spiking in the user's area are checked too (only asked when there are any).
+  const qs = { ...MESSAGE_QUESTIONS, ...(patterns.length ? MATCHES_PATTERN_QUESTION : {}), ...extra };
+  const r = await askJev(patterns.length ? { ...state, active_patterns: patterns } : state, qs, { retries: 1, timeoutMs: 4_000 });
+  const scan = scoreAnswers(r, !!state.known_contact);
+  if (patterns.length) scan.risk = applyPatternFloorToRisk(scan.risk, noul(r, "matches_pattern"));
+  return scan;
 }
 
 /** Rejects after `ms`. The losing promise is left to settle on its own (its result is dropped). */
@@ -124,6 +136,16 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
     await say(["Okay. Merge me into your call in the next 2 minutes and I'll listen quietly and text you warnings."]);
     return;
   }
+  // Flow 5: "ZIP 75080" sets the area for local alerts; a bare REPORT reports the last checked message.
+  const zipReply = await setZipFromText(user, text);
+  if (zipReply) {
+    await say([zipReply]);
+    return;
+  }
+  if (/^\s*report\s*[.!]?\s*$/i.test(text)) {
+    await handleReport(user, (l) => say(l, "rep"));
+    return;
+  }
 
   // 4. Route with Jev and score the message in the same request.
   setTyping(msg.spaceId, msg.agentUserId, true);
@@ -131,7 +153,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
     const state: MessageState = { body: text };
     let scan: ScanResult;
     try {
-      scan = await scanLive(state, INTENT);
+      scan = await scanLive(state, INTENT, await activePatternsFor(user));
     } catch (err: any) {
       console.error(`[inbound] text scan failed for ${msg.id} after ${Date.now() - t0} ms: ${err?.message}`);
       await say([SORRY], "err");
@@ -149,7 +171,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
         await startRecovery({ userId: user.id, text, source: "text" });
         return;
       case "report":
-        await say(["Thanks for telling me. Forward the scam text to 7726 (SPAM) so T-Mobile can block it, then delete it."]);
+        await handleReport(user, (l) => say(l, "rep"), text, scan.scamType);
         return;
       case "setup":
         await startSetup(user, (lines) => say(lines, "setup"));
@@ -212,7 +234,7 @@ async function handleScreenshot(user: User, msg: InboundMessage, say: Say, t0: n
     };
     let scan: ScanResult;
     try {
-      scan = await scanLive(state);
+      scan = await scanLive(state, {}, await activePatternsFor(user));
     } catch (err: any) {
       console.error(`[inbound] screenshot scan failed for ${msg.id} after ${Date.now() - t0} ms: ${err?.message}`);
       await say([SORRY], "err");
@@ -237,8 +259,13 @@ async function reply(
   t0: number,
 ) {
   // Wording must finish by t0 + 5.5 s; past ~4.5 s elapsed the template is used (6 s target).
-  const lines = await writeVerdictReply(scan, body, claimedBrand, { deadline: t0 + 5_500 });
-  await say(lines.filter((l) => l.trim()));
+  const lines = (await writeVerdictReply(scan, body, claimedBrand, { deadline: t0 + 5_500 })).filter((l) => l.trim());
+  // Flow 1 step 13 / Flow 5: invite a report on Likely+ verdicts. The body stays in memory 10 min for it.
+  if (atLeast(scan.risk.level, "likely_scam")) {
+    lines[lines.length - 1] += " Reply REPORT to warn people near you.";
+    rememberBody(user.id, body, scan.scamType);
+  }
+  await say(lines);
   const latencyMs = Date.now() - t0;
   console.log(`[inbound] replied to ${msg.id} in ${latencyMs} ms`);
   await logEvent({
