@@ -134,6 +134,7 @@ async function outboundCall(verifyId: string, relativeId: string, to: string, re
     const msg = String(body?.message ?? body?.detail?.[0]?.msg ?? body?.detail ?? "").replace(/\+?\d[\d\s().-]{6,}\d/g, "<num>");
     throw new Error(`ElevenLabs outbound-call HTTP ${res.status}: ${msg.slice(0, 200)}`);
   }
+  // Response (SDK SipTrunkOutboundCallResponse): { success, message, conversation_id: string|null, sip_call_id: string|null }.
   return (body?.conversation_id as string | undefined) ?? null;
 }
 
@@ -159,6 +160,7 @@ async function onTimer(s: VerifySession) {
 
 const ASK_WORD = "Thanks. Please say your family safe word.";
 const ASK_AGAIN = "Thanks. Please say the family safe word one more time.";
+// end_call args per ElevenLabs docs: { reason (required), message? }. We speak the goodbye ourselves, so no `message`.
 const endCall = (text: string, reason: string) =>
   speakResponse(text, { model: "bouncer-verify", thenTool: { name: "end_call", arguments: { reason } } });
 const say = (text: string) => speakResponse(text, { model: "bouncer-verify" });
