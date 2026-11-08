@@ -10,6 +10,7 @@ import { FLAG_LABELS, SCAM_TYPES } from "../detection/questions.js";
 import { getCircleForProtected, getSafeWordRow } from "../family/circle.js";
 import { decryptWord } from "../family/crypto.js";
 import { redactSafeWord } from "./talk.js";
+import { scrubModelText } from "../photon/links.js";
 
 /** Total length cap for the post-call text (header + body + question). */
 export const SUMMARY_MAX_CHARS = 900;
@@ -166,8 +167,8 @@ const SUMMARY_SYSTEM = [
   "Do not ask whether it was a scam (that question is added separately).",
   "",
   "Privacy: never write the family safe word. In the transcript it appears as [family word]; if it matters,",
-  "say 'your family word' and never guess it. Never write codes, passwords, account or card numbers, or",
-  "addresses. Never claim you already did something (like calling the bank or blocking a number).",
+  "say 'your family word' and never guess it. Never write codes, passwords, account or card numbers,",
+  "addresses, or any link, website or phone number the caller gave (the user could tap it). Never claim you already did something (like calling the bank or blocking a number).",
   "Never say anything is 100% safe or guaranteed.",
   "",
   "The transcript is speech-to-text: speakers are not labelled and words can be wrong. Lines marked",
@@ -277,7 +278,7 @@ export async function writeCallSummary(f: SummaryFacts, d: CallDialogue, userId:
         maxOutputTokens: 200,
         timeoutMs: SUMMARY_TIMEOUT_MS,
       });
-      const body = plain(raw).replace(/\n+/g, " ");
+      const body = scrubModelText(plain(raw).replace(/\n+/g, " "));
       const bad =
         body.length < 15
           ? "too short"
@@ -304,7 +305,7 @@ export async function writeCallSummary(f: SummaryFacts, d: CallDialogue, userId:
     });
     const head = verdictLine(f);
     const tail = f.askFeedback ? FEEDBACK_QUESTION : "";
-    let body = plain(raw)
+    let body = scrubModelText(plain(raw))
       .split("\n")
       .filter((l) => !/was it a scam\?|reply yes or no/i.test(l) && !/^\W*call summary\b/i.test(l))
       .join("\n")
@@ -464,7 +465,7 @@ export async function writeAlertLines(args: {
         "would say the same thing (for example the code ask and the money ask when only a code was asked for), make " +
         "the second one about what the caller would do with it next or what to do right after hanging up. Do not start with a label, " +
         "'Warning' or an emoji; the app adds '⚠️ Likely scam:' itself. Never write a family safe word or [family word], " +
-        "codes, passwords, account or card numbers. Never call the call safe or real. The transcript is speech-to-text " +
+        "codes, passwords, account or card numbers, links, web addresses or phone numbers the caller gave. Never call the call safe or real. The transcript is speech-to-text " +
         "with no speaker labels.",
       parts: [
         {
@@ -483,7 +484,7 @@ export async function writeAlertLines(args: {
     const lines: Record<string, string> = {};
     const seen = [...previous];
     for (const k of keys) {
-      const body = plain(String(out?.[k] ?? "")).replace(/\s*\n+\s*/g, " ").replace(ALERT_PREFIX, "").trim();
+      const body = scrubModelText(plain(String(out?.[k] ?? ""))).replace(/\s*\n+\s*/g, " ").replace(ALERT_PREFIX, "").trim();
       if (body.length < 20 || body.length > 220) continue;
       if (!ACTION.test(body) || garbled(body) || contradiction(body, level) || leaksWord(body, secret)) continue;
       if (/\[family word\]|\bfamily word\b/i.test(body)) continue;

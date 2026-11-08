@@ -2,6 +2,7 @@
 // Shapes verified against @photon-ai/api 0.6.0 types (see docs/API_NOTES.md).
 import { Photon, ApiError } from "@photon-ai/api";
 import { config } from "../config.js";
+import { stripLinks } from "./links.js";
 
 export const photon = new Photon({
   headers: { Authorization: `Bearer ${config.photon.apiKey}` },
@@ -28,7 +29,9 @@ export interface SendTextArgs {
 export const dryRunOutbox: Array<{ spaceId: string; text: string; sensitive: boolean }> = [];
 
 /** Sends one plain-text iMessage. Photon accepts it for async dispatch (not proof of delivery). */
-export async function sendText(args: SendTextArgs): Promise<void> {
+export async function sendText(input: SendTextArgs): Promise<void> {
+  // Never send a scam's link back: iMessage makes it tappable (see links.ts).
+  const args = { ...input, text: stripLinks(input.text) };
   if (config.photon.dryRun) {
     dryRunOutbox.push({ spaceId: args.spaceId, text: args.text, sensitive: !!args.sensitive });
     if (dryRunOutbox.length > 500) dryRunOutbox.shift();
