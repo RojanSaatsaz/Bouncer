@@ -38,7 +38,8 @@ export interface SeedSummary {
 export const normalizeHandle = (h: string) => toE164(h) ?? h.trim();
 const last4 = (s: string | null | undefined) => (s ? s.replace(/\D/g, "").slice(-4) || null : null);
 
-async function upsertUser(db: pg.PoolClient, handle: string, name: string) {
+/** Finds (by handle, then by voice phone) or creates a user and sets their name. Also used by setup.ts. */
+export async function upsertUser(db: pg.PoolClient, handle: string, name: string) {
   const e164 = toE164(handle);
   let u = (await db.query("SELECT * FROM users WHERE imessage_handle = $1", [handle])).rows[0];
   if (!u && e164) {

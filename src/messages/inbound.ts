@@ -7,6 +7,7 @@ import { sendLines, setTyping, downloadAttachment } from "../photon/client.js";
 import { parseYesNo, resolvePending } from "../pending.js";
 import { handleFamilyText, startFamilyEmergency } from "../family/index.js";
 import { startRecovery, handleRecoveryText } from "../recovery/index.js";
+import { handleSetupText, startSetup, isSetupCommand } from "../family/setup.js";
 import { askJev, choice, type JevQuestion } from "../detection/jev.js";
 import { extractScreenshot, type Extracted } from "../detection/extract.js";
 import { isKnownContact, scoreAnswers, updateContactMemory, logEvent, type MessageState, type ScanResult } from "../detection/scan.js";
@@ -89,7 +90,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
     await say([WELCOME], "w");
     console.log(`[inbound] new user ${uid}`);
     // A screenshot or a pasted message as the very first text still gets checked; a hello or YES stops here.
-    if (!msg.attachmentIds.length && !looksLikeContent(text)) return;
+    if (!msg.attachmentIds.length && !looksLikeContent(text) && !isSetupCommand(text)) return;
   }
 
   if (msg.attachmentIds.length) return handleScreenshot(user, msg, say, t0);
@@ -98,7 +99,11 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
   const yn = parseYesNo(text);
   if (yn && (await resolvePending(user.id, yn))) return;
 
-  // 1b. Flow 4: menu number / DONE / NEXT / STOP while a recovery checklist is open.
+  // 1b. Flow 3 setup by text: an open setup conversation, "set up family", "JOIN ABC123", "change safe word".
+  // Before everything else so answers like "done" and the safe word itself never reach Jev or Gemini.
+  if (await handleSetupText(user, msg)) return;
+
+  // 1c. Flow 4: menu number / DONE / NEXT / STOP while a recovery checklist is open.
   if (await handleRecoveryText(user, msg)) return;
 
   // 2. Flow 3 texts during an active emergency ("what's the word?", "he said the word").
@@ -147,7 +152,7 @@ export async function handleInbound(msg: InboundMessage): Promise<void> {
         await say(["Thanks for telling me. Forward the scam text to 7726 (SPAM) so T-Mobile can block it, then delete it."]);
         return;
       case "setup":
-        await say(["I can't set up a family circle by text yet. Once one is set up, I can check on a relative when someone claims they're in trouble."]);
+        await startSetup(user, (lines) => say(lines, "setup"));
         return;
       case "question":
         // Jev's scan wins (rule 3): Likely scam or above always gets the verdict, at any length. A long
