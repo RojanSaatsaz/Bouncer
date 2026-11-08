@@ -2,7 +2,32 @@
 
 Read `CLAUDE.md`, then `docs/API_NOTES.md` (API shapes verified live tonight), then this file. `docs/SPEC.md` has each flow.
 
-## Where things are
+## Where things are (updated ~4:45 AM CST, second machine)
+
+The earlier WIP branches (`flow1-scanner`, `flow2-voice`, `foundation` `c464fc1`) were never pushed and are gone. Flows 1 and 2 were rebuilt on `main` from the spec:
+
+| Piece | State |
+|---|---|
+| Flow 1 scanner + router (`src/messages/inbound.ts`, `src/detection/{scan,extract,reply}.ts`) | On local main. `npm run test:message -- text "…" / image scripts/fixtures/scam-usps.png / scout` pass. |
+| Flow 2 listen + talk (`src/voice/{llm,talk,score,questions,session,sse}.ts`) | On local main. `npm run test:call` 25/25. The SSE stall was a shared headers object getting `Content-Length` written into it (fixed). |
+| Post-call webhook (`src/voice/{webhooks,callEnd}.ts`) | On local main. `npm run test:postcall` passes. |
+| Pending-slot fix (`setPending(..., { ifFree })`) | On local main (replaces `c464fc1`). |
+| Flow 3, Flow 6 | On main, Flow 3 tests pass. |
+
+Local main is **not pushed**; Railway still runs foundation stubs (`2a84b13`), which is why calls are completely silent, even after "Hey Bouncer".
+
+Testing without Railway: a throwaway local Postgres works (`initdb`, `pg_ctl -o "-p 54330 -k ''"`, `DATABASE_URL=postgres://postgres@127.0.0.1:54330/bouncer npx tsx scripts/migrate.ts`), and pass that `DATABASE_URL` on the command line to any test script.
+
+## Do next, in order
+
+1. **Push main** (user approval; it deploys). Set Railway `JEV_MODEL=jev-1.14.0`.
+2. Reopen the DB tunnel after the deploy if needed (`railway connect Postgres --tunnel-only --port 54329`).
+3. **User decision (risk.ts):** see item 6 of the previous list below. Untouched.
+4. Seed the demo circle and do real-device tests (items 7–8 below).
+
+### Previous list (for reference)
+
+## Where things were (first machine)
 
 | Piece | Branch / worktree | State |
 |---|---|---|
@@ -15,7 +40,7 @@ Read `CLAUDE.md`, then `docs/API_NOTES.md` (API shapes verified live tonight), t
 
 Railway runs `2a84b13`: foundation stubs only. iMessages are received and saved but get no reply, and every call turn is answered with `skip_turn`. Local main is ahead, at `docs/HANDOFF.md` plus the Flow 6 and Flow 3 merges.
 
-## Do next, in order
+### Old "do next"
 
 1. **Flow 1:** `cd ../HackUTD-26-wt/flow1-scanner`, `npx tsc --noEmit`, then `DRY_RUN=1 npm run test:message -- scout` (and the `text` / `image scripts/fixtures/…` modes). Fix, commit, then `git merge --no-ff flow1-scanner` from main. Its router must call `resolvePending` first, then `handleFamilyText`, and on `family_emergency` call `startFamilyEmergency({source:"text"})` **without sending its own reply** (Flow 3 sends the coach text).
 2. **Flow 2:** fix the streaming stall in `src/voice/talk.ts` / `speakResponse` (`src/voice/sse.ts`). Then handle **speculative turns**: the live call sent duplicate requests with the same user-turn count, and the last turn's text can be revised. Always skip_turn at once; only act on a turn once it's stable. Wire the post-call webhook: if Verify agent, call `onVerifyCallEnded(conv, {failed})`; `family_danger ≥ 0.7` calls `startFamilyEmergency({source:"call"})`. Run `npm run test:call` (local server `PORT=3102 DRY_RUN=1`), then merge.
