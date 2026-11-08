@@ -115,6 +115,12 @@ CREATE TABLE IF NOT EXISTS eval_results (
 
 -- Our agent's Photon user id on the line (incoming receivedBy.id): the senderId for alerts into space_id.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS photon_sender_id text;
+
+-- ===== Flow 5 (reports / patterns) tables go here =====
+-- ===== end Flow 5 =====
+
+-- ===== Flow 7 (carrier feed / dashboard) tables go here =====
+-- ===== end Flow 7 =====
 `;
 
 /** Creates any missing tables. Logs and carries on if it fails (the existing tables still work). */
