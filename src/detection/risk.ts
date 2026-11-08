@@ -56,6 +56,13 @@ export interface RiskInput {
   urgency_secrecy?: number;
   impersonation?: number;
   knownContact?: boolean;
+  /**
+   * Messages only: every message red-flag probability (MESSAGE_FLAGS). When given, Likely or above needs
+   * a red flag other than impersonation unless severe; otherwise the level is capped at Unsure.
+   * Approved 2026-11-08 (docs/EVAL_ARCHIVE.md): archive test false alarms 60 → 1 with no scam lost;
+   * Mendeley train 4 → 1, 3 of 150 smishing moved to Unsure. Calls don't pass it.
+   */
+  messageFlags?: Record<string, number>;
 }
 
 export interface Risk {
@@ -63,6 +70,8 @@ export interface Risk {
   /** Adjusted probability that it's a scam. */
   p: number;
   severe: boolean;
+  /** Level was capped at Unsure by the needs-a-red-flag rule (scam score alone was Likely+). */
+  capped: boolean;
   /** Number to show the user: p% for scam levels and Unsure, (1-p)% for Safe. */
   confidence: number;
 }
@@ -75,10 +84,18 @@ export function riskLevel(x: RiskInput, t: Thresholds = thresholds): Risk {
       (x.impersonation ?? 0) >= t.combo_severe);
   let p = x.is_scam;
   if (x.knownContact && !severe) p = Math.max(0, p - t.known_contact_discount);
-  const level: RiskLevel =
+  let level: RiskLevel =
     severe || p >= t.high ? "high_risk" : p >= t.likely ? "likely_scam" : p >= t.unsure ? "unsure" : "safe";
+  let capped = false;
+  if (x.messageFlags && !severe && atLeast(level, "likely_scam")) {
+    const others = Object.keys(x.messageFlags).filter((f) => f !== "impersonation");
+    if (!flagsFrom(x.messageFlags, others, t).length) {
+      level = "unsure";
+      capped = true;
+    }
+  }
   const confidence = Math.round((level === "safe" ? 1 - p : p) * 100);
-  return { level, p, severe, confidence };
+  return { level, p, severe, capped, confidence };
 }
 
 /** Red-flag names at or above threshold. `callback` uses its own (higher) bar. */

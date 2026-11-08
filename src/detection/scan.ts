@@ -62,8 +62,13 @@ export function scoreAnswers(r: JevResult, knownContact = false): ScanResult {
     urgency_secrecy: probs.urgency_secrecy,
     impersonation: probs.impersonation,
     knownContact,
+    messageFlags: Object.fromEntries(MESSAGE_FLAGS.map((f) => [f, probs[f]])),
   });
-  const flags = risk.level === "safe" ? [] : flagsFrom(probs, MESSAGE_FLAGS);
+  // impersonation alone fires on almost every business message: only list it when the verdict is Likely+.
+  const flags =
+    risk.level === "safe"
+      ? []
+      : flagsFrom(probs, MESSAGE_FLAGS).filter((f) => f !== "impersonation" || atLeast(risk.level, "likely_scam"));
   const st = choice(r, "scam_type");
   return { risk, flags, scamType: st.label, probs, jev: r };
 }

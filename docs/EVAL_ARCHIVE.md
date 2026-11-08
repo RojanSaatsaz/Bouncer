@@ -219,3 +219,7 @@ npm run eval:archive -- report   # everything above, from data/archive_jev_cache
 ```
 
 `JEV_MODEL` must be a pinned version equal to `jev_model` in `config/thresholds.json` (`jev-1.14.0`). No database is used.
+
+## Applied (2026-11-08)
+
+The user approved the "needs a red flag other than impersonation, unless severe" rule. It now lives in `riskLevel()` (`src/detection/risk.ts`, via `messageFlags`, messages only; calls are unaffected) and in `scripts/eval-metrics.ts`, so every eval measures the shipped logic. Re-scored from cache: archive test false alarms (Likely+) **60/324 → 1/324 (0.3%)**, scams caught still **952/952**. Capped messages reply "🤔 Not sure: no clear red flags, but be careful." and `impersonation` is only listed as a red flag on Likely+ verdicts. Mendeley holdout numbers in docs/EVAL.md predate the rule (train-sample what-if: false alarms 4 → 1, 3 of 150 smishing moved to Unsure).

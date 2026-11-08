@@ -30,6 +30,7 @@ const riskInput = (probs: Record<string, number>) => ({
   urgency_secrecy: probs.urgency_secrecy,
   impersonation: probs.impersonation,
   knownContact: false, // eval rows have no contact history
+  messageFlags: Object.fromEntries(MESSAGE_FLAGS.map((f) => [f, probs[f] ?? 0])),
 });
 
 export function score(id: number | string, label: string, answers: Record<string, JevAnswer>, t: Thresholds): Scored {

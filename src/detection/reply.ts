@@ -29,7 +29,9 @@ export function topFlags(scan: ScanResult, n = 3): string[] {
 }
 
 export const verdictPrefix = (scan: ScanResult) =>
-  scan.risk.level === "unsure"
+  scan.risk.level === "unsure" && scan.risk.capped
+    ? `${EMOJI.unsure} ${LEVEL_LABEL.unsure}: no clear red flags, but be careful.`
+    : scan.risk.level === "unsure"
     ? `${EMOJI.unsure} ${LEVEL_LABEL.unsure} (${scan.risk.confidence}% chance it's a scam).`
     : `${EMOJI[scan.risk.level]} ${LEVEL_LABEL[scan.risk.level]} (${scan.risk.confidence}% sure).`;
 
