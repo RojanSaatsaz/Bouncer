@@ -60,6 +60,16 @@ export const config = {
     model: env("JEV_MODEL"),
   },
 
+  // Wording, chat, spoken replies and screenshot reading. OpenRouter (DeepSeek) when OPENROUTER_API_KEY is
+  // set, else Gemini. LLM_PROVIDER=gemini forces Gemini. Gemini is still used for report embeddings (Flow 5).
+  openrouter: process.env.OPENROUTER_API_KEY?.trim() && process.env.LLM_PROVIDER?.trim().toLowerCase() !== "gemini"
+    ? {
+        apiKey: process.env.OPENROUTER_API_KEY.trim(),
+        model: process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4.1-flash", // quality tier
+        fastModel: process.env.OPENROUTER_FAST_MODEL?.trim() || "deepseek/deepseek-v4.1-flash",
+      }
+    : null,
+
   gemini: {
     apiKey: env("GEMINI_API_KEY"),
     model: env("GEMINI_MODEL"), // vision / quality tier

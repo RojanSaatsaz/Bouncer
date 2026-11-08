@@ -20,6 +20,8 @@ import { scoreNow, callerTranscript } from "./score.js";
 import { speakResponse, skipTurnResponse } from "./sse.js";
 import type { CallSession } from "./session.js";
 
+const MAX_SPOKEN_SENTENCES = 3;
+
 export const WAKE = /\b(hey|hi|ok(ay)?)[,.!]?\s+(bouncer|bouncers|bounce her)\b/i;
 export const THANKS = /\b(thanks?|thank you)[,.!]?\s+(bouncer|bouncers|bounce her)\b/i;
 /** "Bouncer, is this real?" — the name first (after an optional "so"/"okay"). */
@@ -351,12 +353,26 @@ async function* reply(s: CallSession, idx: number): AsyncGenerator<string> {
         timeoutMs: 8000,
         noFallback: true, // a dead tier would only add a second slow failure while the caller waits
       });
-      for await (const piece of withoutSafeWord(pieces, secret)) {
+      // Spoken replies stop after 3 sentences even if the model runs long (CLAUDE.md: keep it short on a call).
+      let sentences = 0;
+      let prevChar = "";
+      outer: for await (const piece of withoutSafeWord(pieces, secret)) {
         const clean = piece.replace(/[*_#`]/g, "");
-        if (clean) {
-          spoke = true;
-          yield clean;
+        if (!clean) continue;
+        let out = "";
+        for (const ch of clean) {
+          // "$4.35" or "3.5" isn't a sentence end: skip a period right after a digit.
+          const end = /[!?]/.test(ch) || (ch === "." && !/\d$/.test(prevChar));
+          prevChar = ch;
+          out += ch;
+          if (end && ++sentences >= MAX_SPOKEN_SENTENCES) {
+            spoke = true;
+            yield out;
+            break outer;
+          }
         }
+        spoke = true;
+        yield out;
       }
       if (spoke) return;
     } catch (err: any) {

@@ -1,11 +1,17 @@
-// Gemini REST client (v1beta generateContent / streamGenerateContent).
-// Gemini reads screenshots and writes wording. It never decides whether something is a scam (rule 3).
+// Wording / chat / spoken replies / screenshot reading. Despite the file name, this is the one LLM entry point:
+// when OPENROUTER_API_KEY is set, every call goes to OpenRouter (DeepSeek V4.1 Flash, see openrouter.ts);
+// otherwise to the Gemini REST client below (v1beta generateContent / streamGenerateContent).
+// The model reads screenshots and writes wording. It never decides whether something is a scam (rule 3).
+//
+// Why OpenRouter (2026-11-08): the Gemini key is on the free tier (gemini-3.5-flash = 20 requests/day,
+// exhausted; flash-lite 429s under load), so most replies were falling back to fixed templates.
 //
 // Two tiers, measured 2026-11-08 3 AM:
 //   "quality" = GEMINI_MODEL (gemini-3.5-flash): better vision, but 1.5–17 s and frequent 503s tonight.
 //   "fast"    = GEMINI_FAST_MODEL (gemini-3.5-flash-lite): ~0.6 s JSON, ~0.5 s to first streamed token.
 // Every call has a timeout and falls back to the other tier on 503 / 429 / timeout.
 import { config } from "../config.js";
+import { OpenRouterRetryable, openRouterOnce, openRouterStream } from "./openrouter.js";
 
 export type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
 export type Tier = "quality" | "fast";
@@ -67,6 +73,16 @@ async function once(a: GenerateArgs, tier: Tier): Promise<string> {
 
 /** Plain text (or a JSON string when jsonSchema is set). Tries the requested tier, then the other one. */
 export async function generate(a: GenerateArgs): Promise<string> {
+  const or = config.openrouter;
+  if (or) {
+    try {
+      return await openRouterOnce(or, a, a.tier);
+    } catch (err) {
+      if (!(err instanceof OpenRouterRetryable) || a.noFallback) throw err;
+      console.warn(`[llm] ${err.message}; retrying on the ${other(a.tier)} tier`);
+      return await openRouterOnce(or, a, other(a.tier));
+    }
+  }
   try {
     return await once(a, a.tier);
   } catch (err) {
@@ -78,7 +94,15 @@ export async function generate(a: GenerateArgs): Promise<string> {
 
 /** Parsed JSON output. */
 export async function generateJson<T>(a: GenerateArgs & { jsonSchema: Record<string, unknown> }): Promise<T> {
-  return JSON.parse(await generate(a)) as T;
+  const raw = await generate(a);
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    // Some models wrap JSON in ```json fences or add a stray sentence: take the outermost object.
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("LLM returned no JSON object");
+    return JSON.parse(m[0]) as T;
+  }
 }
 
 /**
@@ -86,6 +110,10 @@ export async function generateJson<T>(a: GenerateArgs & { jsonSchema: Record<str
  * Falls back to the other tier only if the first request fails before any text arrives.
  */
 export async function* generateStream(a: GenerateArgs): AsyncGenerator<string> {
+  if (config.openrouter) {
+    yield* openRouterStream(config.openrouter, a, a.noFallback ? [a.tier] : [a.tier, other(a.tier)]);
+    return;
+  }
   let res: Response | null = null;
   for (const tier of a.noFallback ? [a.tier] : [a.tier, other(a.tier)]) {
     const model = modelFor(tier);
